@@ -14,6 +14,11 @@ const field = (overrides: Partial<DomFieldSignal>): DomFieldSignal => ({
   multiple: false,
   validationRules: [],
   options: [],
+  context: {
+    pageTitle: 'Test page',
+    urlPath: '/test',
+  },
+  confidence: 0.5,
   frameworkHints: { react: false, angular: false, vue: false },
   shadowDom: false,
   ...overrides,

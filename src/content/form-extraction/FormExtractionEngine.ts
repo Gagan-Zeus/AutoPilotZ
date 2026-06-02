@@ -1,4 +1,6 @@
 import type {
+  FieldExtractionContext,
+  FieldExtractionResult,
   FormControlKind,
   FormOption,
   FrameworkHints,
@@ -77,6 +79,7 @@ export class FormExtractionEngine {
       title: this.rootDocument.title,
       extractedAt: new Date().toISOString(),
       fields,
+      fieldContexts: fields.map((field) => this.toFieldExtractionResult(field)),
       sections,
       stats: {
         forms: new Set(
@@ -148,8 +151,11 @@ export class FormExtractionEngine {
     const required = validationRules.some(
       (rule) => rule.name === 'required' && rule.value !== false,
     );
+    const label = this.findLabel(element);
+    const sectionHeading = this.findSectionHeading(element);
+    const context = this.buildContext(element, label, sectionHeading);
 
-    return {
+    const field: NormalizedFormField = {
       fieldId: this.fieldId(element, selector),
       kind: this.kindForControl(element),
       selector,
@@ -159,11 +165,13 @@ export class FormExtractionEngine {
       id: element.id || undefined,
       name: this.getAttribute(element, 'name'),
       placeholder: this.getAttribute(element, 'placeholder'),
-      label: this.findLabel(element),
+      label,
       ariaLabel: this.getAriaLabel(element),
       autocomplete: this.getAttribute(element, 'autocomplete'),
       nearbyText: this.findNearbyText(element),
-      sectionHeading: this.findSectionHeading(element),
+      sectionHeading,
+      context,
+      confidence: 0,
       required,
       disabled: this.isDisabled(element),
       readOnly: this.isReadOnly(element),
@@ -174,6 +182,7 @@ export class FormExtractionEngine {
       frameworkHints: this.detectFrameworkHints(element),
       shadowDom,
     };
+    return { ...field, confidence: this.calculateConfidence(field) };
   }
 
   private extractChoiceGroup(group: FieldGroup): NormalizedFormField {
@@ -187,8 +196,11 @@ export class FormExtractionEngine {
     const required =
       options.some((option) => option.required) ||
       validationRules.some((rule) => rule.name === 'required' && rule.value !== false);
+    const label = this.findGroupLabel(firstControl) ?? this.findLabel(firstControl);
+    const sectionHeading = this.findSectionHeading(firstControl);
+    const context = this.buildContext(firstControl, label, sectionHeading);
 
-    return {
+    const field: NormalizedFormField = {
       fieldId: `group:${group.kind}:${group.key}`,
       kind: group.kind,
       selector,
@@ -198,11 +210,13 @@ export class FormExtractionEngine {
       id: firstControl.id || undefined,
       name: firstControl.name || undefined,
       placeholder: undefined,
-      label: this.findGroupLabel(firstControl) ?? this.findLabel(firstControl),
+      label,
       ariaLabel: this.getAriaLabel(firstControl),
       autocomplete: this.getAttribute(firstControl, 'autocomplete'),
       nearbyText: this.findNearbyText(firstControl),
-      sectionHeading: this.findSectionHeading(firstControl),
+      sectionHeading,
+      context,
+      confidence: 0,
       required,
       disabled: group.controls.every((control) => control.disabled),
       readOnly: false,
@@ -213,6 +227,7 @@ export class FormExtractionEngine {
       frameworkHints: this.mergeFrameworkHints(group.controls),
       shadowDom: group.controls.some((control) => control.getRootNode() instanceof ShadowRoot),
     };
+    return { ...field, confidence: this.calculateConfidence(field) };
   }
 
   private traverseComposedTree(): TraversedElement[] {
@@ -455,6 +470,131 @@ export class FormExtractionEngine {
     }
 
     return this.cleanText(candidates.filter(Boolean).join(' '));
+  }
+
+  private buildContext(
+    element: Element,
+    labelText: string | undefined,
+    sectionTitle: string | undefined,
+  ): FieldExtractionContext {
+    return {
+      labelText,
+      surroundingText: this.findSurroundingText(element),
+      previousSiblingText: this.findSiblingText(element, 'previous'),
+      nextSiblingText: this.findSiblingText(element, 'next'),
+      formTitle: this.findFormTitle(element),
+      pageTitle: this.rootDocument.title,
+      urlPath: this.rootDocument.location.pathname,
+      sectionTitle,
+    };
+  }
+
+  private toFieldExtractionResult(field: NormalizedFormField): FieldExtractionResult {
+    return {
+      fieldId: field.fieldId,
+      type: this.exposedFieldType(field),
+      label: field.label,
+      context: field.context,
+      confidence: field.confidence,
+    };
+  }
+
+  private exposedFieldType(field: NormalizedFormField): string {
+    if (field.kind === 'input' && field.type) {
+      return field.type;
+    }
+    return field.kind;
+  }
+
+  private calculateConfidence(field: NormalizedFormField): number {
+    let score = 0.12;
+
+    if (field.label) score += 0.25;
+    if (field.ariaLabel) score += 0.12;
+    if (field.name) score += 0.1;
+    if (field.id) score += 0.08;
+    if (field.placeholder) score += 0.08;
+    if (field.autocomplete) score += 0.12;
+    if (field.context.previousSiblingText) score += 0.05;
+    if (field.context.nextSiblingText) score += 0.04;
+    if (field.context.surroundingText) score += 0.06;
+    if (field.context.formTitle) score += 0.04;
+    if (field.context.sectionTitle) score += 0.06;
+    if (field.validationRules.length > 0) score += 0.03;
+    if (field.options.length > 0) score += 0.04;
+
+    return Math.min(1, Number(score.toFixed(2)));
+  }
+
+  private findSiblingText(element: Element, direction: 'previous' | 'next'): string | undefined {
+    const sibling =
+      direction === 'previous' ? element.previousElementSibling : element.nextElementSibling;
+    if (sibling?.textContent?.trim()) {
+      return this.cleanText(sibling.textContent);
+    }
+
+    const parentSibling =
+      direction === 'previous'
+        ? element.parentElement?.previousElementSibling
+        : element.parentElement?.nextElementSibling;
+    if (parentSibling?.textContent?.trim()) {
+      return this.cleanText(parentSibling.textContent);
+    }
+
+    return undefined;
+  }
+
+  private findSurroundingText(element: Element): string | undefined {
+    const container =
+      element.closest(
+        'label,fieldset,[role="group"],[role="radiogroup"],.form-group,.field,.control',
+      ) ?? element.parentElement;
+    if (!container) {
+      return undefined;
+    }
+
+    const clone = container.cloneNode(true) as HTMLElement;
+    clone
+      .querySelectorAll('input,select,textarea,button,[contenteditable],script,style')
+      .forEach((node) => node.remove());
+    return this.cleanText(clone.textContent);
+  }
+
+  private findFormTitle(element: Element): string | undefined {
+    const form = element.closest('form');
+    if (!form) {
+      return this.findSectionHeading(element);
+    }
+
+    const ariaLabel = form.getAttribute('aria-label');
+    if (ariaLabel) {
+      return this.cleanText(ariaLabel);
+    }
+
+    const labelledBy = form.getAttribute('aria-labelledby');
+    if (labelledBy) {
+      const root = form.getRootNode() as Document | ShadowRoot;
+      const text = labelledBy
+        .split(/\s+/)
+        .map((id) => root.getElementById?.(id)?.textContent)
+        .join(' ');
+      const cleaned = this.cleanText(text);
+      if (cleaned) {
+        return cleaned;
+      }
+    }
+
+    const innerTitle = form.querySelector(sectionSelector);
+    if (innerTitle?.textContent?.trim()) {
+      return this.cleanText(innerTitle.textContent);
+    }
+
+    const precedingTitle = this.findPrecedingHeading(form);
+    if (precedingTitle) {
+      return precedingTitle;
+    }
+
+    return this.cleanText(form.getAttribute('name') ?? form.id);
   }
 
   private findSectionHeading(element: Element): string | undefined {

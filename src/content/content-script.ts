@@ -22,6 +22,8 @@ function handleMessage(message: ContentMessage): unknown {
   switch (message.type) {
     case 'CONTENT_EXTRACT_FIELDS':
       return formExtractionEngine.extract().fields;
+    case 'CONTENT_EXTRACT_FIELD_CONTEXTS':
+      return formExtractionEngine.extract().fieldContexts;
     case 'CONTENT_EXTRACT_FORM_JSON':
       return formExtractionEngine.extract();
     case 'CONTENT_APPLY_MAPPINGS':

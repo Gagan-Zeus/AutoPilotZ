@@ -6,6 +6,8 @@ import { FormExtractionEngine } from '../src/content/form-extraction/FormExtract
 
 describe('FormExtractionEngine', () => {
   it('extracts normalized JSON for standard controls and validation rules', () => {
+    document.title = 'Application page';
+    window.history.pushState({}, '', '/careers/apply?job=42');
     document.body.innerHTML = `
       <form id="profile" name="profileForm" action="/apply" method="post">
         <h2>Personal details</h2>
@@ -42,6 +44,26 @@ describe('FormExtractionEngine', () => {
         required: true,
       }),
     );
+    expect(typeof firstName?.confidence).toBe('number');
+    expect(firstName?.context).toEqual(
+      expect.objectContaining({
+        labelText: 'First name',
+        previousSiblingText: 'First name',
+        formTitle: 'Personal details',
+        pageTitle: 'Application page',
+        urlPath: '/careers/apply',
+        sectionTitle: 'Personal details',
+      }),
+    );
+    expect(firstName?.confidence).toBeGreaterThan(0.7);
+    const firstNameContext = extraction.fieldContexts.find(
+      (fieldContext) => fieldContext.fieldId === firstName?.fieldId,
+    );
+    expect(firstNameContext?.type).toBe('text');
+    expect(firstNameContext?.label).toBe('First name');
+    expect(firstNameContext?.context.labelText).toBe('First name');
+    expect(firstNameContext?.context.urlPath).toBe('/careers/apply');
+    expect(firstNameContext?.confidence).toBe(firstName?.confidence);
     expect(firstName?.validationRules).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'required', source: 'native' }),

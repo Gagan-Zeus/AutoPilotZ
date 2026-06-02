@@ -38,6 +38,14 @@ export class HeuristicAiMappingEngine implements MappingModel {
         field.placeholder,
         field.ariaLabel,
         field.type,
+        field.context.labelText,
+        field.context.surroundingText,
+        field.context.previousSiblingText,
+        field.context.nextSiblingText,
+        field.context.formTitle,
+        field.context.pageTitle,
+        field.context.urlPath,
+        field.context.sectionTitle,
       ].join(' '),
     );
 

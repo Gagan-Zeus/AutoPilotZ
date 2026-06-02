@@ -29,6 +29,25 @@ export interface FrameworkHints {
   vue: boolean;
 }
 
+export interface FieldExtractionContext {
+  labelText?: string;
+  surroundingText?: string;
+  previousSiblingText?: string;
+  nextSiblingText?: string;
+  formTitle?: string;
+  pageTitle: string;
+  urlPath: string;
+  sectionTitle?: string;
+}
+
+export interface FieldExtractionResult {
+  fieldId: string;
+  type: string;
+  label?: string;
+  context: FieldExtractionContext;
+  confidence: number;
+}
+
 export interface NormalizedFormField {
   fieldId: string;
   kind: FormControlKind;
@@ -44,6 +63,8 @@ export interface NormalizedFormField {
   autocomplete?: string;
   nearbyText?: string;
   sectionHeading?: string;
+  context: FieldExtractionContext;
+  confidence: number;
   required: boolean;
   disabled: boolean;
   readOnly: boolean;
@@ -72,6 +93,7 @@ export interface NormalizedFormExtraction {
   title: string;
   extractedAt: string;
   fields: NormalizedFormField[];
+  fieldContexts: FieldExtractionResult[];
   sections: NormalizedFormSection[];
   stats: {
     forms: number;
