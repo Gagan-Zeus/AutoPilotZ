@@ -10,6 +10,7 @@ import type { NormalizedFormField } from '../../core/entities/FormExtraction';
 import type { ProfileData, VaultProfile } from '../../core/entities/Profile';
 import type { AiMappingCache } from '../../core/ports/AiMappingCache';
 import type { AiMappingClient } from '../../core/ports/AiMappingClient';
+import { AiMappingPromptBuilder } from './AiMappingPromptBuilder';
 import { InMemoryAiMappingCache } from './InMemoryAiMappingCache';
 
 export interface AiMappingEngineOptions {
@@ -33,6 +34,7 @@ export class AiMappingEngine {
     private readonly client: AiMappingClient,
     cache?: AiMappingCache,
     private readonly options: Partial<AiMappingEngineOptions> = {},
+    private readonly promptBuilder = new AiMappingPromptBuilder(),
   ) {
     this.cache = cache ?? new InMemoryAiMappingCache();
   }
@@ -57,7 +59,9 @@ export class AiMappingEngine {
       const batchRequest: AiMappingBatchRequest = {
         fields: batch.map((field) => this.toBatchField(field)),
         profilePaths,
+        prompt: '',
       };
+      batchRequest.prompt = this.promptBuilder.build(batchRequest);
       const modelResults = await this.withRetry(
         () => this.client.mapFields(batchRequest),
         options.maxRetries,

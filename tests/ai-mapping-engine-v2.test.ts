@@ -60,6 +60,11 @@ describe('AiMappingEngine', () => {
 
     expect(client.calls).toHaveLength(2);
     expect(JSON.stringify(client.calls)).not.toContain('private@example.com');
+    expect(client.calls[0]?.prompt).toContain('You are an expert form-field mapping system.');
+    expect(client.calls[0]?.prompt).toContain('Return JSON only:');
+    expect(client.calls[0]?.prompt).toContain('"profileKey"');
+    expect(client.calls[0]?.prompt).toContain('"email"');
+    expect(client.calls[0]?.prompt).not.toContain('private@example.com');
     expect(results).toEqual([
       {
         fieldId: 'email-field',

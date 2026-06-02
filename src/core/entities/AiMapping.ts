@@ -35,6 +35,7 @@ export interface AiMappingBatchField {
 }
 
 export interface AiMappingBatchRequest {
+  prompt: string;
   fields: AiMappingBatchField[];
   profilePaths: ProfilePathDescriptor[];
 }
