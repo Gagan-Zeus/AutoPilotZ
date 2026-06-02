@@ -1,10 +1,13 @@
 import type { ContentMessage, RuntimeResponse } from '../shared/messaging/messages';
 import { FormFillingEngine } from './form-filling/FormFillingEngine';
 import { FormExtractionEngine } from './form-extraction/FormExtractionEngine';
+import { PageMonitor } from './page-monitoring/PageMonitor';
 
 const formExtractionEngine = new FormExtractionEngine(document);
 const formFillingEngine = new FormFillingEngine(document);
+const pageMonitor = new PageMonitor(document);
 formExtractionEngine.startObserving();
+pageMonitor.start();
 
 chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResponse) => {
   try {
@@ -27,6 +30,8 @@ function handleMessage(message: ContentMessage): unknown {
       return formExtractionEngine.extract().fieldContexts;
     case 'CONTENT_EXTRACT_FORM_JSON':
       return formExtractionEngine.extract();
+    case 'CONTENT_PAGE_MONITOR_SNAPSHOT':
+      return pageMonitor.snapshot();
     case 'CONTENT_APPLY_MAPPINGS':
       return formFillingEngine.applyMappings(message.mappings, message.values);
     default:

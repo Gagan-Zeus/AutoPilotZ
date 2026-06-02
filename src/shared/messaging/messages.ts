@@ -4,6 +4,7 @@ import type {
   FieldExtractionResult,
   NormalizedFormExtraction,
 } from '../../core/entities/FormExtraction';
+import type { PageMonitorSnapshot } from '../../core/entities/PageMonitoring';
 import type {
   ExportedVaultBundle,
   ProfileData,
@@ -41,6 +42,7 @@ export type ContentMessage =
   | { type: 'CONTENT_EXTRACT_FIELDS' }
   | { type: 'CONTENT_EXTRACT_FIELD_CONTEXTS' }
   | { type: 'CONTENT_EXTRACT_FORM_JSON' }
+  | { type: 'CONTENT_PAGE_MONITOR_SNAPSHOT' }
   | {
       type: 'CONTENT_APPLY_MAPPINGS';
       mappings: FieldMapping[];
@@ -52,6 +54,7 @@ export type RuntimeResponse<T> = { ok: true; data: T } | { ok: false; error: str
 export type ValidateProfileResponse = ProfileValidationResult;
 export type ExtractFormJsonResponse = NormalizedFormExtraction;
 export type ExtractFieldContextsResponse = FieldExtractionResult[];
+export type PageMonitorSnapshotResponse = PageMonitorSnapshot;
 
 export const sendRuntimeMessage = async <T>(message: RuntimeMessage): Promise<T> => {
   const response: RuntimeResponse<T> = await chrome.runtime.sendMessage(message);
