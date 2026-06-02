@@ -1,4 +1,5 @@
 import type { EncryptedProfileRecord, VaultProfile } from '../../core/entities/Profile';
+import { profileDataToAttributes } from '../../core/entities/Profile';
 import type { ProfileVaultRepository } from '../../core/ports/ProfileVaultRepository';
 import type { StorageArea } from '../chrome/ChromeStorageArea';
 import { ProfileCrypto } from '../security/ProfileCrypto';
@@ -28,7 +29,12 @@ export class IndexedDbProfileVaultRepository implements ProfileVaultRepository {
       ),
     );
 
-    return profiles.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    return profiles
+      .map((profile) => ({
+        ...profile,
+        attributes: profileDataToAttributes(profile.data),
+      }))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   async save(profile: VaultProfile, passphrase: string): Promise<VaultProfile> {

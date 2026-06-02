@@ -31,6 +31,29 @@ async function handleMessage(message: RuntimeMessage): Promise<unknown> {
       });
     case 'VAULT_REMOVE_PROFILE':
       return container.removeProfile.execute(message.id);
+    case 'VAULT_SEARCH_PROFILES':
+      return container.searchProfiles.execute({
+        passphrase: message.passphrase,
+        query: message.query,
+      });
+    case 'VAULT_SWITCH_PROFILE':
+      return container.switchProfile.execute({
+        passphrase: message.passphrase,
+        profileId: message.profileId,
+      });
+    case 'VAULT_EXPORT_PROFILES':
+      return container.exportProfiles.execute({
+        passphrase: message.passphrase,
+        profileIds: message.profileIds,
+      });
+    case 'VAULT_IMPORT_PROFILES':
+      return container.importProfiles.execute({
+        passphrase: message.passphrase,
+        bundle: message.bundle,
+        mode: message.mode,
+      });
+    case 'VAULT_VALIDATE_PROFILE':
+      return container.validateProfile.execute(message.data);
     case 'AI_MAP_FIELDS': {
       const settings = await container.getSettings.execute();
       if (!settings.aiMappingEnabled) {

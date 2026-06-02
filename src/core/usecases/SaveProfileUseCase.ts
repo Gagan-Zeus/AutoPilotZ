@@ -1,11 +1,11 @@
-import type { VaultProfile } from '../entities/Profile';
-import { createProfile } from '../entities/Profile';
+import type { ProfileData, VaultProfile } from '../entities/Profile';
+import { createProfile, validateProfileData } from '../entities/Profile';
 import type { ProfileVaultRepository } from '../ports/ProfileVaultRepository';
 
 export interface SaveProfileCommand {
   id?: string;
   label: string;
-  attributes: VaultProfile['attributes'];
+  data: ProfileData;
   passphrase: string;
 }
 
@@ -21,10 +21,15 @@ export class SaveProfileUseCase {
       throw new Error('Profile label is required.');
     }
 
+    const validation = validateProfileData(command.data);
+    if (!validation.valid) {
+      throw new Error(validation.issues.map((issue) => issue.message).join(' '));
+    }
+
     const profile = createProfile({
       id: command.id,
       label: command.label,
-      attributes: command.attributes,
+      data: command.data,
     });
 
     return this.repository.save(profile, command.passphrase);

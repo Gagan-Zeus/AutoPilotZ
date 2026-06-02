@@ -1,20 +1,33 @@
 import { create } from 'zustand';
 import type { DomFieldSignal } from '../core/entities/Mapping';
 import type { FieldMapping } from '../core/entities/Mapping';
-import type { VaultProfile } from '../core/entities/Profile';
+import type {
+  ExportedVaultBundle,
+  ProfileData,
+  ProfileValidationResult,
+  VaultProfile,
+} from '../core/entities/Profile';
 import { sendRuntimeMessage, sendTabMessage } from '../shared/messaging/messages';
 
 interface PopupState {
   passphrase: string;
   profiles: VaultProfile[];
   selectedProfileId?: string;
+  searchQuery: string;
   lastMappings: FieldMapping[];
+  exportBundle?: ExportedVaultBundle;
   status: string;
   loading: boolean;
   setPassphrase: (passphrase: string) => void;
+  setSearchQuery: (query: string) => void;
   loadProfiles: () => Promise<void>;
-  saveProfile: (label: string, attributes: VaultProfile['attributes']) => Promise<void>;
+  saveProfile: (label: string, data: ProfileData, id?: string) => Promise<void>;
   selectProfile: (id: string) => void;
+  switchProfile: (id: string) => Promise<void>;
+  searchProfiles: (query: string) => Promise<void>;
+  validateProfile: (data: ProfileData) => Promise<ProfileValidationResult>;
+  exportProfiles: (profileIds?: string[]) => Promise<ExportedVaultBundle | undefined>;
+  importProfiles: (bundle: ExportedVaultBundle, mode?: 'merge' | 'replace') => Promise<void>;
   mapActiveTab: () => Promise<void>;
 }
 
@@ -22,11 +35,14 @@ export const usePopupStore = create<PopupState>((set, get) => ({
   passphrase: '',
   profiles: [],
   selectedProfileId: undefined,
+  searchQuery: '',
   lastMappings: [],
+  exportBundle: undefined,
   status: 'Locked',
   loading: false,
   setPassphrase: (passphrase) => set({ passphrase }),
   selectProfile: (id) => set({ selectedProfileId: id }),
+  setSearchQuery: (query) => set({ searchQuery: query }),
   loadProfiles: async () => {
     set({ loading: true, status: 'Unlocking vault...' });
     try {
@@ -45,17 +61,90 @@ export const usePopupStore = create<PopupState>((set, get) => ({
       set({ loading: false });
     }
   },
-  saveProfile: async (label, attributes) => {
+  saveProfile: async (label, data, id) => {
     set({ loading: true, status: 'Saving encrypted profile...' });
     try {
       await sendRuntimeMessage<VaultProfile>({
         type: 'VAULT_SAVE_PROFILE',
         passphrase: get().passphrase,
-        profile: { label, attributes },
+        profile: { id, label, data },
       });
       await get().loadProfiles();
     } catch (error) {
       set({ status: error instanceof Error ? error.message : 'Unable to save profile.' });
+    } finally {
+      set({ loading: false });
+    }
+  },
+  switchProfile: async (id) => {
+    set({ loading: true, status: 'Switching profile...' });
+    try {
+      const profile = await sendRuntimeMessage<VaultProfile>({
+        type: 'VAULT_SWITCH_PROFILE',
+        passphrase: get().passphrase,
+        profileId: id,
+      });
+      set({ selectedProfileId: profile.id, status: `Active profile: ${profile.label}` });
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : 'Unable to switch profile.' });
+    } finally {
+      set({ loading: false });
+    }
+  },
+  searchProfiles: async (query) => {
+    set({ loading: true, searchQuery: query, status: 'Searching profiles...' });
+    try {
+      const profiles = await sendRuntimeMessage<VaultProfile[]>({
+        type: 'VAULT_SEARCH_PROFILES',
+        passphrase: get().passphrase,
+        query,
+      });
+      set({
+        profiles,
+        selectedProfileId: profiles[0]?.id,
+        status: `${profiles.length} profile${profiles.length === 1 ? '' : 's'} found`,
+      });
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : 'Unable to search profiles.' });
+    } finally {
+      set({ loading: false });
+    }
+  },
+  validateProfile: async (data) =>
+    sendRuntimeMessage<ProfileValidationResult>({
+      type: 'VAULT_VALIDATE_PROFILE',
+      data,
+    }),
+  exportProfiles: async (profileIds) => {
+    set({ loading: true, status: 'Exporting encrypted profiles...' });
+    try {
+      const bundle = await sendRuntimeMessage<ExportedVaultBundle>({
+        type: 'VAULT_EXPORT_PROFILES',
+        passphrase: get().passphrase,
+        profileIds,
+      });
+      set({ exportBundle: bundle, status: 'Encrypted export ready' });
+      return bundle;
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : 'Unable to export profiles.' });
+      return undefined;
+    } finally {
+      set({ loading: false });
+    }
+  },
+  importProfiles: async (bundle, mode = 'merge') => {
+    set({ loading: true, status: 'Importing encrypted profiles...' });
+    try {
+      const result = await sendRuntimeMessage<{ imported: number; profiles: VaultProfile[] }>({
+        type: 'VAULT_IMPORT_PROFILES',
+        passphrase: get().passphrase,
+        bundle,
+        mode,
+      });
+      await get().loadProfiles();
+      set({ status: `${result.imported} profile${result.imported === 1 ? '' : 's'} imported` });
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : 'Unable to import profiles.' });
     } finally {
       set({ loading: false });
     }
