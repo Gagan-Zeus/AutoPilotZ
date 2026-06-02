@@ -1,28 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DomFieldSignal } from '../src/core/entities/Mapping';
 import { HeuristicAiMappingEngine } from '../src/infra/ai/HeuristicAiMappingEngine';
-
-const field = (overrides: Partial<DomFieldSignal>): DomFieldSignal => ({
-  fieldId: overrides.selector ?? '#field',
-  kind: 'input',
-  selector: overrides.selector ?? '#field',
-  selectors: [overrides.selector ?? '#field'],
-  tagName: 'input',
-  required: false,
-  disabled: false,
-  readOnly: false,
-  multiple: false,
-  validationRules: [],
-  options: [],
-  context: {
-    pageTitle: 'Test page',
-    urlPath: '/test',
-  },
-  confidence: 0.5,
-  frameworkHints: { react: false, angular: false, vue: false },
-  shadowDom: false,
-  ...overrides,
-});
+import { field } from './field-test-utils';
 
 describe('HeuristicAiMappingEngine', () => {
   it('maps fields using semantic signals', async () => {

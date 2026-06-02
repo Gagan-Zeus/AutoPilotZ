@@ -12,12 +12,14 @@ import { HeuristicAiMappingEngine } from '../infra/ai/HeuristicAiMappingEngine';
 import { ChromeLocalStorageArea } from '../infra/chrome/ChromeStorageArea';
 import { ChromeSettingsRepository } from '../infra/chrome/ChromeSettingsRepository';
 import { IndexedDbProfileVaultRepository } from '../infra/indexeddb/IndexedDbProfileVaultRepository';
+import { DeterministicRuleMappingEngine } from '../infra/mapping/DeterministicRuleMappingEngine';
 import { EncryptedVaultBundleCipher } from '../infra/security/EncryptedVaultBundleCipher';
 
 export const createContainer = () => {
   const storage = new ChromeLocalStorageArea();
   const settingsRepository = new ChromeSettingsRepository(storage);
   const vaultRepository = new IndexedDbProfileVaultRepository(storage);
+  const deterministicMappingEngine = new DeterministicRuleMappingEngine();
   const mappingEngine = new HeuristicAiMappingEngine();
   const vaultBundleCipher = new EncryptedVaultBundleCipher();
 
@@ -30,7 +32,7 @@ export const createContainer = () => {
     exportProfiles: new ExportProfilesUseCase(vaultRepository, vaultBundleCipher),
     importProfiles: new ImportProfilesUseCase(vaultRepository, vaultBundleCipher),
     validateProfile: new ValidateProfileUseCase(),
-    mapFields: new MapFieldsUseCase(mappingEngine),
+    mapFields: new MapFieldsUseCase(deterministicMappingEngine, mappingEngine),
     getSettings: new GetSettingsUseCase(settingsRepository),
     updateSettings: new UpdateSettingsUseCase(settingsRepository),
   };
