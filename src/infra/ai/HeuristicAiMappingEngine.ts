@@ -54,6 +54,7 @@ export class HeuristicAiMappingEngine implements MappingModel {
       const score = this.score(fieldText, profileKey);
       if (!best || score.confidence > best.confidence) {
         best = {
+          fieldId: field.fieldId,
           selector: field.selector,
           profileKey,
           confidence: score.confidence,

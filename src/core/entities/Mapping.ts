@@ -3,6 +3,7 @@ import type { NormalizedFormField } from './FormExtraction';
 export type DomFieldSignal = NormalizedFormField;
 
 export interface FieldMapping {
+  fieldId?: string;
   selector: string;
   profileKey: string;
   confidence: number;

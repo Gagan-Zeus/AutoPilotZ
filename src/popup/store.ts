@@ -8,6 +8,12 @@ import type {
   VaultProfile,
 } from '../core/entities/Profile';
 import { sendRuntimeMessage, sendTabMessage } from '../shared/messaging/messages';
+import {
+  createReviewItems,
+  previewAttributeValue,
+  reviewItemToMapping,
+  type MappingReviewItem,
+} from './review';
 
 interface PopupState {
   passphrase: string;
@@ -15,6 +21,7 @@ interface PopupState {
   selectedProfileId?: string;
   searchQuery: string;
   lastMappings: FieldMapping[];
+  reviewItems: MappingReviewItem[];
   exportBundle?: ExportedVaultBundle;
   status: string;
   loading: boolean;
@@ -29,6 +36,10 @@ interface PopupState {
   exportProfiles: (profileIds?: string[]) => Promise<ExportedVaultBundle | undefined>;
   importProfiles: (bundle: ExportedVaultBundle, mode?: 'merge' | 'replace') => Promise<void>;
   mapActiveTab: () => Promise<void>;
+  acceptReviewItem: (id: string) => void;
+  rejectReviewItem: (id: string) => void;
+  editReviewItem: (id: string, profileKey: string) => void;
+  applyAcceptedMappings: () => Promise<void>;
 }
 
 export const usePopupStore = create<PopupState>((set, get) => ({
@@ -37,11 +48,12 @@ export const usePopupStore = create<PopupState>((set, get) => ({
   selectedProfileId: undefined,
   searchQuery: '',
   lastMappings: [],
+  reviewItems: [],
   exportBundle: undefined,
   status: 'Locked',
   loading: false,
   setPassphrase: (passphrase) => set({ passphrase }),
-  selectProfile: (id) => set({ selectedProfileId: id }),
+  selectProfile: (id) => set({ selectedProfileId: id, reviewItems: [] }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   loadProfiles: async () => {
     set({ loading: true, status: 'Unlocking vault...' });
@@ -53,6 +65,7 @@ export const usePopupStore = create<PopupState>((set, get) => ({
       set({
         profiles,
         selectedProfileId: profiles[0]?.id,
+        reviewItems: [],
         status: profiles.length ? `${profiles.length} profile loaded` : 'Vault is empty',
       });
     } catch (error) {
@@ -84,7 +97,11 @@ export const usePopupStore = create<PopupState>((set, get) => ({
         passphrase: get().passphrase,
         profileId: id,
       });
-      set({ selectedProfileId: profile.id, status: `Active profile: ${profile.label}` });
+      set({
+        selectedProfileId: profile.id,
+        reviewItems: [],
+        status: `Active profile: ${profile.label}`,
+      });
     } catch (error) {
       set({ status: error instanceof Error ? error.message : 'Unable to switch profile.' });
     } finally {
@@ -102,6 +119,7 @@ export const usePopupStore = create<PopupState>((set, get) => ({
       set({
         profiles,
         selectedProfileId: profiles[0]?.id,
+        reviewItems: [],
         status: `${profiles.length} profile${profiles.length === 1 ? '' : 's'} found`,
       });
     } catch (error) {
@@ -173,18 +191,97 @@ export const usePopupStore = create<PopupState>((set, get) => ({
         fields,
         profileAttributes: selectedProfile.attributes,
       });
-      const result = await sendTabMessage<{ applied: number }>(tab.id, {
-        type: 'CONTENT_APPLY_MAPPINGS',
-        mappings,
-        values: selectedProfile.attributes,
-      });
+      const reviewItems = createReviewItems(fields, mappings, selectedProfile.attributes);
 
       set({
         lastMappings: mappings,
-        status: `${result.applied} field${result.applied === 1 ? '' : 's'} applied`,
+        reviewItems,
+        status: `${reviewItems.length} mapping${reviewItems.length === 1 ? '' : 's'} ready for review`,
       });
     } catch (error) {
       set({ status: error instanceof Error ? error.message : 'Unable to map active tab.' });
+    } finally {
+      set({ loading: false });
+    }
+  },
+  acceptReviewItem: (id) => {
+    set((state) => ({
+      reviewItems: state.reviewItems.map((item) =>
+        item.id === id ? { ...item, status: 'accepted' } : item,
+      ),
+    }));
+  },
+  rejectReviewItem: (id) => {
+    set((state) => ({
+      reviewItems: state.reviewItems.map((item) =>
+        item.id === id ? { ...item, status: 'rejected' } : item,
+      ),
+    }));
+  },
+  editReviewItem: (id, profileKey) => {
+    const selectedProfile = get().profiles.find(
+      (profile) => profile.id === get().selectedProfileId,
+    );
+    const attributes = selectedProfile?.attributes ?? {};
+    set((state) => ({
+      reviewItems: state.reviewItems.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              editedProfileKey: profileKey,
+              valuePreview: previewAttributeValue(profileKey, attributes[profileKey]),
+              status: 'accepted',
+            }
+          : item,
+      ),
+    }));
+  },
+  applyAcceptedMappings: async () => {
+    const selectedProfile = get().profiles.find(
+      (profile) => profile.id === get().selectedProfileId,
+    );
+    if (!selectedProfile) {
+      set({ status: 'Select a profile before applying mappings.' });
+      return;
+    }
+
+    const acceptedItems = get().reviewItems.filter((item) => item.status === 'accepted');
+    if (acceptedItems.length === 0) {
+      set({ status: 'Accept at least one mapping before applying.' });
+      return;
+    }
+
+    set({ loading: true, status: 'Applying accepted mappings...' });
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) {
+        throw new Error('No active tab found.');
+      }
+
+      const acceptedMappings = acceptedItems.map(reviewItemToMapping);
+      const result = await sendTabMessage<{ applied: number; requiresConfirmation: unknown[] }>(
+        tab.id,
+        {
+          type: 'CONTENT_APPLY_MAPPINGS',
+          mappings: acceptedMappings,
+          values: selectedProfile.attributes,
+          confirmedSensitiveFieldIds: acceptedItems
+            .map((item) => item.fieldId)
+            .filter((fieldId): fieldId is string => Boolean(fieldId)),
+          confirmedSensitiveSelectors: acceptedItems.map((item) => item.selector),
+          confirmedSensitiveProfileKeys: acceptedItems.map((item) => item.editedProfileKey),
+        },
+      );
+
+      set({
+        lastMappings: acceptedMappings,
+        status:
+          result.requiresConfirmation.length > 0
+            ? `${result.applied} applied; ${result.requiresConfirmation.length} still require confirmation`
+            : `${result.applied} field${result.applied === 1 ? '' : 's'} applied`,
+      });
+    } catch (error) {
+      set({ status: error instanceof Error ? error.message : 'Unable to apply mappings.' });
     } finally {
       set({ loading: false });
     }

@@ -33,7 +33,11 @@ function handleMessage(message: ContentMessage): unknown {
     case 'CONTENT_PAGE_MONITOR_SNAPSHOT':
       return pageMonitor.snapshot();
     case 'CONTENT_APPLY_MAPPINGS':
-      return formFillingEngine.applyMappings(message.mappings, message.values);
+      return formFillingEngine.applyMappings(message.mappings, message.values, {
+        confirmedSensitiveFieldIds: message.confirmedSensitiveFieldIds,
+        confirmedSensitiveProfileKeys: message.confirmedSensitiveProfileKeys,
+        confirmedSensitiveSelectors: message.confirmedSensitiveSelectors,
+      });
     default:
       return assertNever(message);
   }

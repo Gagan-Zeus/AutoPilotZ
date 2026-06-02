@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react';
 import { useMemo, useState } from 'react';
 import type { ExportedVaultBundle, ProfileData } from '../core/entities/Profile';
+import type { MappingReviewItem } from './review';
 import { usePopupStore } from './store';
 
 const sampleProfileData: ProfileData = {
@@ -55,6 +56,7 @@ export function PopupApp() {
     searchQuery,
     exportBundle,
     lastMappings,
+    reviewItems,
     status,
     loading,
     setPassphrase,
@@ -66,6 +68,10 @@ export function PopupApp() {
     exportProfiles,
     importProfiles,
     mapActiveTab,
+    acceptReviewItem,
+    rejectReviewItem,
+    editReviewItem,
+    applyAcceptedMappings,
   } = usePopupStore();
   const [label, setLabel] = useState('Default');
   const [profileJson, setProfileJson] = useState(JSON.stringify(sampleProfileData, null, 2));
@@ -75,6 +81,14 @@ export function PopupApp() {
     () => profiles.find((profile) => profile.id === selectedProfileId),
     [profiles, selectedProfileId],
   );
+  const profileKeys = useMemo(
+    () =>
+      Object.keys(selectedProfile?.attributes ?? {}).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    [selectedProfile],
+  );
+  const acceptedReviewCount = reviewItems.filter((item) => item.status === 'accepted').length;
 
   const handleSave = (event: FormEvent) => {
     event.preventDefault();
@@ -86,7 +100,7 @@ export function PopupApp() {
   };
 
   return (
-    <main className="w-[420px] bg-panel text-ink">
+    <main className="max-h-[640px] w-[480px] overflow-auto bg-panel text-ink">
       <section className="border-b border-slate-200 px-4 py-3">
         <div className="flex items-center justify-between">
           <h1 className="text-base font-semibold">AutoPilotX</h1>
@@ -184,7 +198,7 @@ export function PopupApp() {
             type="button"
             onClick={() => void mapActiveTab()}
           >
-            Fill
+            Review
           </button>
         </div>
 
@@ -214,7 +228,18 @@ export function PopupApp() {
           placeholder="Encrypted import/export bundle"
         />
 
-        {lastMappings.length > 0 && (
+        <ReviewMode
+          acceptedCount={acceptedReviewCount}
+          items={reviewItems}
+          loading={loading}
+          profileKeys={profileKeys}
+          onAccept={acceptReviewItem}
+          onApply={() => void applyAcceptedMappings()}
+          onEdit={editReviewItem}
+          onReject={rejectReviewItem}
+        />
+
+        {reviewItems.length === 0 && lastMappings.length > 0 && (
           <ul className="max-h-28 space-y-1 overflow-auto text-xs text-slate-600">
             {lastMappings.map((mapping) => (
               <li key={`${mapping.selector}:${mapping.profileKey}`}>
@@ -227,3 +252,132 @@ export function PopupApp() {
     </main>
   );
 }
+
+interface ReviewModeProps {
+  acceptedCount: number;
+  items: MappingReviewItem[];
+  loading: boolean;
+  profileKeys: string[];
+  onAccept: (id: string) => void;
+  onApply: () => void;
+  onEdit: (id: string, profileKey: string) => void;
+  onReject: (id: string) => void;
+}
+
+function ReviewMode({
+  acceptedCount,
+  items,
+  loading,
+  profileKeys,
+  onAccept,
+  onApply,
+  onEdit,
+  onReject,
+}: ReviewModeProps) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="space-y-3 border-t border-slate-200 pt-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Review mappings</h2>
+        <button
+          className="rounded bg-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+          disabled={loading || acceptedCount === 0}
+          type="button"
+          onClick={onApply}
+        >
+          Apply accepted ({acceptedCount})
+        </button>
+      </div>
+
+      <ul className="max-h-72 space-y-2 overflow-auto pr-1">
+        {items.map((item) => (
+          <li
+            className="rounded border border-slate-200 bg-white p-3 text-xs shadow-sm"
+            key={item.id}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-slate-900">{item.fieldLabel}</p>
+                <p className="mt-1 truncate text-slate-500">{item.fieldContext}</p>
+              </div>
+              <span
+                className={`shrink-0 rounded px-2 py-1 font-medium ${
+                  item.status === 'accepted'
+                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                    : item.status === 'rejected'
+                      ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
+                      : 'bg-slate-50 text-slate-600 ring-1 ring-slate-200'
+                }`}
+              >
+                {item.status}
+              </span>
+            </div>
+
+            <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+              <label className="min-w-0">
+                <span className="mb-1 block font-medium text-slate-600">Detected mapping</span>
+                <select
+                  className="w-full rounded border border-slate-300 bg-white px-2 py-1.5"
+                  value={item.editedProfileKey}
+                  onChange={(event) => onEdit(item.id, event.target.value)}
+                >
+                  {profileKeys.map((profileKey) => (
+                    <option key={profileKey} value={profileKey}>
+                      {profileKey}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div>
+                <span className="mb-1 block font-medium text-slate-600">Confidence</span>
+                <span className={confidenceClassName(item.confidence)}>
+                  {Math.round(item.confidence * 100)}%
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <span className="mb-1 block font-medium text-slate-600">Value preview</span>
+              <p className="truncate rounded bg-slate-50 px-2 py-1.5 font-mono text-slate-700 ring-1 ring-slate-200">
+                {item.valuePreview}
+              </p>
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                className="rounded bg-ink px-3 py-1.5 font-medium text-white disabled:opacity-50"
+                disabled={loading || item.status === 'accepted'}
+                type="button"
+                onClick={() => onAccept(item.id)}
+              >
+                Accept
+              </button>
+              <button
+                className="rounded bg-white px-3 py-1.5 font-medium text-ink ring-1 ring-slate-300 disabled:opacity-50"
+                disabled={loading || item.status === 'rejected'}
+                type="button"
+                onClick={() => onReject(item.id)}
+              >
+                Reject
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+const confidenceClassName = (confidence: number): string => {
+  const base = 'inline-flex min-w-12 justify-center rounded px-2 py-1.5 font-semibold ring-1';
+  if (confidence >= 0.9) {
+    return `${base} bg-emerald-50 text-emerald-700 ring-emerald-200`;
+  }
+  if (confidence >= 0.7) {
+    return `${base} bg-amber-50 text-amber-700 ring-amber-200`;
+  }
+  return `${base} bg-rose-50 text-rose-700 ring-rose-200`;
+};

@@ -204,4 +204,65 @@ describe('FormFillingEngine', () => {
       },
     ]);
   });
+
+  it('blocks sensitive fields until explicit confirmation is supplied', () => {
+    document.body.innerHTML = `
+      <label for="email">Email</label><input id="email" />
+      <label for="password">Password</label><input id="password" type="password" />
+    `;
+    const password = document.querySelector<HTMLInputElement>('#password')!;
+    const passwordEvents = eventsFor(password);
+
+    const result = new FormFillingEngine(document).applyMappings(
+      [
+        {
+          fieldId: 'email-field',
+          selector: '#email',
+          profileKey: 'email',
+          confidence: 1,
+          reason: 'test',
+        },
+        {
+          fieldId: 'password-field',
+          selector: '#password',
+          profileKey: 'password',
+          confidence: 1,
+          reason: 'test',
+        },
+      ],
+      { email: 'ada@example.com', password: 'never-fill-without-confirmation' },
+    );
+
+    expect(result.applied).toBe(1);
+    expect(result.requiresConfirmation).toHaveLength(1);
+    expect(result.requiresConfirmation[0]?.categories).toContain('password');
+    expect(document.querySelector<HTMLInputElement>('#email')?.value).toBe('ada@example.com');
+    expect(password.value).toBe('');
+    expect(passwordEvents).toEqual([]);
+  });
+
+  it('fills sensitive fields after selector confirmation', () => {
+    document.body.innerHTML = `<label for="cvv">Card CVV</label><input id="cvv" />`;
+    const input = document.querySelector<HTMLInputElement>('#cvv')!;
+    const events = eventsFor(input);
+
+    const result = new FormFillingEngine(document).applyMappings(
+      [
+        {
+          fieldId: 'cvv-field',
+          selector: '#cvv',
+          profileKey: 'cvv',
+          confidence: 1,
+          reason: 'test',
+        },
+      ],
+      { cvv: '123' },
+      { confirmedSensitiveSelectors: ['#cvv'] },
+    );
+
+    expect(result.applied).toBe(1);
+    expect(result.requiresConfirmation).toEqual([]);
+    expect(input.value).toBe('123');
+    expect(events).toEqual(['input', 'change', 'blur', 'focusout']);
+  });
 });

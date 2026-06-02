@@ -196,6 +196,7 @@ export class DeterministicRuleMappingEngine implements MappingModel {
 
     const best = candidates.sort((left, right) => right.confidence - left.confidence)[0];
     return {
+      fieldId: field.fieldId,
       selector: field.selector,
       profileKey: best.profileKey,
       confidence: best.confidence,

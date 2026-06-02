@@ -1,9 +1,15 @@
 import type { FieldMapping } from '../../core/entities/Mapping';
+import {
+  AutofillSafetyPolicy,
+  type AutofillSafetyBlock,
+  type AutofillSafetyOptions,
+} from './AutofillSafetyPolicy';
 
 export type FillValue = string | number | boolean | readonly string[];
 
 export interface FillResult {
   applied: number;
+  requiresConfirmation: AutofillSafetyBlock[];
   failed: Array<{
     selector: string;
     profileKey: string;
@@ -26,10 +32,17 @@ interface FrameworkHints {
 }
 
 export class FormFillingEngine {
-  constructor(private readonly rootDocument: Document = document) {}
+  constructor(
+    private readonly rootDocument: Document = document,
+    private readonly safetyPolicy = new AutofillSafetyPolicy(),
+  ) {}
 
-  applyMappings(mappings: FieldMapping[], values: Record<string, FillValue>): FillResult {
-    const result: FillResult = { applied: 0, failed: [] };
+  applyMappings(
+    mappings: FieldMapping[],
+    values: Record<string, FillValue>,
+    options: AutofillSafetyOptions = {},
+  ): FillResult {
+    const result: FillResult = { applied: 0, requiresConfirmation: [], failed: [] };
 
     for (const mapping of mappings) {
       const value = values[mapping.profileKey];
@@ -49,6 +62,14 @@ export class FormFillingEngine {
           profileKey: mapping.profileKey,
           reason: 'Mapped field was not found in the document.',
         });
+        continue;
+      }
+
+      const safetyDecision = this.safetyPolicy.assess(mapping, element, options);
+      if (!safetyDecision.allowed) {
+        if (safetyDecision.block) {
+          result.requiresConfirmation.push(safetyDecision.block);
+        }
         continue;
       }
 
