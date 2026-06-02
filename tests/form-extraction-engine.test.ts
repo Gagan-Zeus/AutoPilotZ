@@ -155,6 +155,86 @@ describe('FormExtractionEngine', () => {
     expect(github?.selector).toContain('>>>');
   });
 
+  it('recursively traverses nested open Shadow DOM roots', () => {
+    document.body.innerHTML = `<outer-host id="outer"></outer-host>`;
+    const outerHost = document.querySelector<HTMLElement>('#outer')!;
+    const outerRoot = outerHost.attachShadow({ mode: 'open' });
+    outerRoot.innerHTML = `<inner-host id="inner"></inner-host>`;
+    const innerHost = outerRoot.querySelector<HTMLElement>('#inner')!;
+    const innerRoot = innerHost.attachShadow({ mode: 'open' });
+    innerRoot.innerHTML = `
+      <label for="portfolio">Portfolio</label>
+      <input id="portfolio" name="portfolio" />
+    `;
+
+    const extraction = new FormExtractionEngine(document).extract();
+    const portfolio = extraction.fields.find((field) => field.name === 'portfolio');
+
+    expect(extraction.stats.shadowRoots).toBe(2);
+    expect(portfolio).toEqual(
+      expect.objectContaining({
+        shadowDom: true,
+        label: 'Portfolio',
+      }),
+    );
+    expect(portfolio?.selector).toContain('#outer >>> #inner >>> #portfolio');
+  });
+
+  it('observes dynamically inserted open Shadow DOM hosts', async () => {
+    document.body.innerHTML = `<div id="container"></div>`;
+    const engine = new FormExtractionEngine(document);
+    let changes = 0;
+    const stop = engine.startObserving(() => {
+      changes += 1;
+    });
+
+    const host = document.createElement('dynamic-host');
+    const shadowRoot = host.attachShadow({ mode: 'open' });
+    shadowRoot.innerHTML = `<input id="email" name="email" />`;
+    document.querySelector('#container')!.append(host);
+    await Promise.resolve();
+
+    const extraction = engine.extract();
+    stop();
+
+    expect(changes).toBeGreaterThan(0);
+    expect(extraction.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'email',
+          shadowDom: true,
+        }),
+      ]),
+    );
+  });
+
+  it('observes fields added to shadow roots created after observation starts', async () => {
+    document.body.innerHTML = `<late-host id="late"></late-host>`;
+    const engine = new FormExtractionEngine(document);
+    let changes = 0;
+    const stop = engine.startObserving(() => {
+      changes += 1;
+    });
+
+    const host = document.querySelector<HTMLElement>('#late')!;
+    const shadowRoot = host.attachShadow({ mode: 'open' });
+    shadowRoot.innerHTML = `<input id="phone" name="phone" />`;
+    await Promise.resolve();
+
+    const extraction = engine.extract();
+    stop();
+
+    expect(changes).toBeGreaterThan(0);
+    expect(extraction.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'phone',
+          shadowDom: true,
+        }),
+      ]),
+    );
+  });
+
   it('detects framework-specific form hints and validation metadata', () => {
     document.body.innerHTML = `
       <app-root ng-version="18.0.0">

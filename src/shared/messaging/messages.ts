@@ -44,7 +44,7 @@ export type ContentMessage =
   | {
       type: 'CONTENT_APPLY_MAPPINGS';
       mappings: FieldMapping[];
-      values: Record<string, string | number | boolean>;
+      values: Record<string, string | number | boolean | readonly string[]>;
     };
 
 export type RuntimeResponse<T> = { ok: true; data: T } | { ok: false; error: string };

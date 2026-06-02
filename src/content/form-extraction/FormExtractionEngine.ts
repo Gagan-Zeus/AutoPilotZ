@@ -36,6 +36,8 @@ const maxTextLength = 160;
 
 export class FormExtractionEngine {
   private observer?: MutationObserver;
+  private readonly shadowRootObservers = new Map<ShadowRoot, MutationObserver>();
+  private originalAttachShadow?: typeof Element.prototype.attachShadow;
   private version = 0;
 
   constructor(private readonly rootDocument: Document = document) {}
@@ -97,13 +99,43 @@ export class FormExtractionEngine {
 
   startObserving(onChange?: () => void): () => void {
     this.stopObserving();
-    this.observer = new MutationObserver((mutations) => {
+    this.patchAttachShadow(onChange);
+    this.observer = this.createMutationObserver(onChange);
+    this.observer.observe(this.rootDocument.documentElement, this.observerOptions());
+    this.observeDiscoveredShadowRoots(this.rootDocument, onChange);
+
+    return () => this.stopObserving();
+  }
+
+  stopObserving(): void {
+    this.observer?.disconnect();
+    this.observer = undefined;
+    for (const observer of this.shadowRootObservers.values()) {
+      observer.disconnect();
+    }
+    this.shadowRootObservers.clear();
+    this.restoreAttachShadow();
+  }
+
+  getVersion(): number {
+    return this.version;
+  }
+
+  private createMutationObserver(onChange?: () => void): MutationObserver {
+    return new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        this.observeShadowRootsFromMutation(mutation, onChange);
+      }
+
       if (mutations.some((mutation) => this.mutationCanAffectForms(mutation))) {
         this.version += 1;
         onChange?.();
       }
     });
-    this.observer.observe(this.rootDocument.documentElement, {
+  }
+
+  private observerOptions(): MutationObserverInit {
+    return {
       subtree: true,
       childList: true,
       attributes: true,
@@ -127,18 +159,87 @@ export class FormExtractionEngine {
         'ng-reflect-name',
         'ng-reflect-required',
       ],
-    });
-
-    return () => this.stopObserving();
+    };
   }
 
-  stopObserving(): void {
-    this.observer?.disconnect();
-    this.observer = undefined;
+  private observeDiscoveredShadowRoots(root: ParentNode, onChange?: () => void): void {
+    for (const element of Array.from(root.children)) {
+      const shadowRoot = this.openShadowRoot(element);
+      if (shadowRoot) {
+        this.observeShadowRoot(shadowRoot, onChange);
+        this.observeDiscoveredShadowRoots(shadowRoot, onChange);
+      }
+      this.observeDiscoveredShadowRoots(element, onChange);
+    }
   }
 
-  getVersion(): number {
-    return this.version;
+  private observeShadowRoot(shadowRoot: ShadowRoot, onChange?: () => void): void {
+    if (this.shadowRootObservers.has(shadowRoot)) {
+      return;
+    }
+
+    const observer = this.createMutationObserver(onChange);
+    observer.observe(shadowRoot, this.observerOptions());
+    this.shadowRootObservers.set(shadowRoot, observer);
+  }
+
+  private observeShadowRootsFromMutation(mutation: MutationRecord, onChange?: () => void): void {
+    if (mutation.type === 'attributes' && mutation.target instanceof Element) {
+      const shadowRoot = this.openShadowRoot(mutation.target);
+      if (shadowRoot) {
+        this.observeShadowRoot(shadowRoot, onChange);
+      }
+    }
+
+    for (const node of Array.from(mutation.addedNodes)) {
+      if (node instanceof Element) {
+        const shadowRoot = this.openShadowRoot(node);
+        if (shadowRoot) {
+          this.observeShadowRoot(shadowRoot, onChange);
+          this.observeDiscoveredShadowRoots(shadowRoot, onChange);
+        }
+        this.observeDiscoveredShadowRoots(node, onChange);
+      }
+    }
+  }
+
+  private patchAttachShadow(onChange?: () => void): void {
+    if (this.originalAttachShadow || typeof Element === 'undefined') {
+      return;
+    }
+
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'attachShadow');
+    if (!descriptor || typeof descriptor.value !== 'function') {
+      return;
+    }
+
+    const originalAttachShadow = descriptor.value as typeof Element.prototype.attachShadow;
+    this.originalAttachShadow = originalAttachShadow;
+    const observeShadowRoot = (shadowRoot: ShadowRoot) =>
+      this.observeShadowRoot(shadowRoot, onChange);
+    const notifyChange = () => {
+      this.version += 1;
+      onChange?.();
+    };
+
+    Element.prototype.attachShadow = function attachShadow(
+      this: Element,
+      init: ShadowRootInit,
+    ): ShadowRoot {
+      const shadowRoot = originalAttachShadow.call(this, init);
+      if (init.mode === 'open') {
+        observeShadowRoot(shadowRoot);
+        notifyChange();
+      }
+      return shadowRoot;
+    };
+  }
+
+  private restoreAttachShadow(): void {
+    if (this.originalAttachShadow && typeof Element !== 'undefined') {
+      Element.prototype.attachShadow = this.originalAttachShadow;
+      this.originalAttachShadow = undefined;
+    }
   }
 
   private extractSingleControl(
@@ -235,7 +336,7 @@ export class FormExtractionEngine {
     const visit = (root: ParentNode, shadowDom: boolean) => {
       for (const element of Array.from(root.children)) {
         result.push({ element, shadowDom });
-        const shadowRoot = (element as HTMLElement).shadowRoot;
+        const shadowRoot = this.openShadowRoot(element);
         if (shadowRoot) {
           visit(shadowRoot, true);
         }
@@ -842,12 +943,18 @@ export class FormExtractionEngine {
     return Array.from(mutation.addedNodes).some(
       (node) =>
         node instanceof Element &&
-        (node.matches(fieldSelector) || Boolean(node.querySelector(fieldSelector))),
+        (node.matches(fieldSelector) ||
+          Boolean(node.querySelector(fieldSelector)) ||
+          Boolean(this.openShadowRoot(node)?.querySelector(fieldSelector))),
     );
   }
 
   private countShadowRoots(elements: TraversedElement[]): number {
-    return elements.filter((item) => (item.element as HTMLElement).shadowRoot).length;
+    return elements.filter((item) => this.openShadowRoot(item.element)).length;
+  }
+
+  private openShadowRoot(element: Element): ShadowRoot | null {
+    return element instanceof HTMLElement && element.shadowRoot ? element.shadowRoot : null;
   }
 
   private getAttribute(element: Element, name: string): string | undefined {
