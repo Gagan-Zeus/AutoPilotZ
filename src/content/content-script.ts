@@ -1,5 +1,9 @@
 import type { ContentMessage, RuntimeResponse } from '../shared/messaging/messages';
-import type { DomFieldSignal, FieldMapping } from '../core/entities/Mapping';
+import type { FieldMapping } from '../core/entities/Mapping';
+import { FormExtractionEngine } from './form-extraction/FormExtractionEngine';
+
+const formExtractionEngine = new FormExtractionEngine(document);
+formExtractionEngine.startObserving();
 
 chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResponse) => {
   try {
@@ -17,31 +21,14 @@ chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResp
 function handleMessage(message: ContentMessage): unknown {
   switch (message.type) {
     case 'CONTENT_EXTRACT_FIELDS':
-      return extractFields();
+      return formExtractionEngine.extract().fields;
+    case 'CONTENT_EXTRACT_FORM_JSON':
+      return formExtractionEngine.extract();
     case 'CONTENT_APPLY_MAPPINGS':
       return applyMappings(message.mappings, message.values);
     default:
       return assertNever(message);
   }
-}
-
-function extractFields(): DomFieldSignal[] {
-  const controls = [...document.querySelectorAll('input, select, textarea')];
-  return controls.filter(isVisibleControl).map((control) => {
-    const element = control as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-    const id = element.id || undefined;
-    return {
-      selector: stableSelector(element),
-      tagName: element.tagName.toLowerCase() as DomFieldSignal['tagName'],
-      type: 'type' in element ? element.type : undefined,
-      name: element.getAttribute('name') ?? undefined,
-      id,
-      label: findLabel(element),
-      placeholder: element.getAttribute('placeholder') ?? undefined,
-      autocomplete: element.getAttribute('autocomplete') ?? undefined,
-      ariaLabel: element.getAttribute('aria-label') ?? undefined,
-    };
-  });
 }
 
 function applyMappings(
@@ -50,15 +37,27 @@ function applyMappings(
 ): { applied: number } {
   let applied = 0;
   for (const mapping of mappings) {
-    const element = document.querySelector<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >(mapping.selector);
+    const element = findMappedElement(mapping.selector);
     const value = values[mapping.profileKey];
     if (!element || value === undefined) {
       continue;
     }
 
-    element.value = String(value);
+    if (element instanceof HTMLInputElement && element.type === 'checkbox') {
+      element.checked = Boolean(value);
+    } else if (element instanceof HTMLInputElement && element.type === 'radio') {
+      element.checked = element.value === String(value);
+    } else if (element instanceof HTMLElement && element.isContentEditable) {
+      element.textContent = String(value);
+    } else if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLTextAreaElement ||
+      element instanceof HTMLSelectElement
+    ) {
+      element.value = String(value);
+    } else {
+      continue;
+    }
     element.dispatchEvent(new Event('input', { bubbles: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
     element.style.outline = '2px solid #0f766e';
@@ -69,54 +68,32 @@ function applyMappings(
   return { applied };
 }
 
-function stableSelector(element: Element): string {
-  if (element.id) {
-    return `#${CSS.escape(element.id)}`;
-  }
+function findMappedElement(
+  selector: string,
+): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLElement | null {
+  const selectorParts = selector.split('>>>').map((part) => part.trim());
+  let root: Document | ShadowRoot = document;
+  let element: Element | null = null;
 
-  const name = element.getAttribute('name');
-  if (name) {
-    return `${element.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
-  }
-
-  const segments: string[] = [];
-  let current: Element | null = element;
-  while (current && current !== document.body) {
-    const parentElement: Element | null = current.parentElement;
-    if (!parentElement) {
-      break;
+  for (const selectorPart of selectorParts) {
+    element = root.querySelector(selectorPart);
+    if (!element) {
+      return null;
     }
-    const siblings = Array.from(parentElement.children);
-    const index = siblings.indexOf(current) + 1;
-    segments.unshift(`${current.tagName.toLowerCase()}:nth-child(${index})`);
-    current = parentElement;
-  }
-
-  return segments.join(' > ');
-}
-
-function findLabel(element: HTMLElement): string | undefined {
-  if (element.id) {
-    const label = document.querySelector<HTMLLabelElement>(
-      `label[for="${CSS.escape(element.id)}"]`,
-    );
-    if (label?.textContent?.trim()) {
-      return label.textContent.trim();
+    if (selectorPart !== selectorParts.at(-1)) {
+      if (!(element instanceof HTMLElement) || !element.shadowRoot) {
+        return null;
+      }
+      root = element.shadowRoot;
     }
   }
 
-  const wrappingLabel = element.closest('label');
-  if (wrappingLabel?.textContent?.trim()) {
-    return wrappingLabel.textContent.trim();
-  }
-
-  return undefined;
-}
-
-function isVisibleControl(element: Element): boolean {
-  const control = element as HTMLElement;
-  const rect = control.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0 && control.offsetParent !== null;
+  return element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement ||
+    element instanceof HTMLSelectElement ||
+    element instanceof HTMLElement
+    ? element
+    : null;
 }
 
 function assertNever(value: never): never {

@@ -1,5 +1,6 @@
 import type { ExtensionSettings } from '../../core/entities/Settings';
 import type { DomFieldSignal, FieldMapping } from '../../core/entities/Mapping';
+import type { NormalizedFormExtraction } from '../../core/entities/FormExtraction';
 import type {
   ExportedVaultBundle,
   ProfileData,
@@ -35,6 +36,7 @@ export type RuntimeMessage =
 
 export type ContentMessage =
   | { type: 'CONTENT_EXTRACT_FIELDS' }
+  | { type: 'CONTENT_EXTRACT_FORM_JSON' }
   | {
       type: 'CONTENT_APPLY_MAPPINGS';
       mappings: FieldMapping[];
@@ -44,6 +46,7 @@ export type ContentMessage =
 export type RuntimeResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export type ValidateProfileResponse = ProfileValidationResult;
+export type ExtractFormJsonResponse = NormalizedFormExtraction;
 
 export const sendRuntimeMessage = async <T>(message: RuntimeMessage): Promise<T> => {
   const response: RuntimeResponse<T> = await chrome.runtime.sendMessage(message);

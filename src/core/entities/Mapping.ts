@@ -1,14 +1,6 @@
-export interface DomFieldSignal {
-  selector: string;
-  tagName: 'input' | 'select' | 'textarea';
-  type?: string;
-  name?: string;
-  id?: string;
-  label?: string;
-  placeholder?: string;
-  autocomplete?: string;
-  ariaLabel?: string;
-}
+import type { NormalizedFormField } from './FormExtraction';
+
+export type DomFieldSignal = NormalizedFormField;
 
 export interface FieldMapping {
   selector: string;
