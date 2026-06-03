@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Dynamic Fixture</title>
+  </head>
+  <body>
+    <main>
+      <h1>Dynamic form host</h1>
+      <button id="add-form" type="button">Add form</button>
+      <div id="mount"></div>
+    </main>
+    <script>
+      document.querySelector('#add-form').addEventListener('click', () => {
+        const form = document.createElement('form');
+        form.id = 'dynamic-profile';
+        form.innerHTML = `
+          <label for="dynamic-last-name">Last name</label>
+          <input id="dynamic-last-name" name="lastName" autocomplete="family-name" />
+        `;
+        document.querySelector('#mount').append(form);
+      });
+    </script>
+  </body>
+</html>

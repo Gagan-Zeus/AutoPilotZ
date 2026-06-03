@@ -64,7 +64,7 @@ describe('security mitigations', () => {
     };
 
     expect(manifest.permissions).toEqual(['activeTab', 'storage']);
-    expect(manifest.host_permissions).toBeUndefined();
+    expect(manifest.host_permissions).toEqual(['http://*/*', 'https://*/*']);
     expect(manifest.content_scripts[0]?.matches).toEqual(['http://*/*', 'https://*/*']);
     expect(manifest.content_security_policy?.extension_pages).toContain("script-src 'self'");
     expect(manifest.content_security_policy?.extension_pages).toContain("object-src 'none'");

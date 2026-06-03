@@ -24,6 +24,7 @@ function manifestPlugin(): Plugin {
           run_at: 'document_idle',
         },
       ];
+      manifest.host_permissions = ['http://*/*', 'https://*/*'];
 
       mkdirSync(dirname(distManifestPath), { recursive: true });
       writeFileSync(distManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

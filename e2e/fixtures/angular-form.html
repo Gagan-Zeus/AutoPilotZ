@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Angular Fixture</title>
+  </head>
+  <body>
+    <app-root ng-version="18.0.0">
+      <form id="angular-form">
+        <label for="angular-phone">Mobile phone</label>
+        <input id="angular-phone" name="phone" formControlName="phone" type="tel" />
+        <label for="angular-city">City</label>
+        <input id="angular-city" name="city" formControlName="city" />
+      </form>
+      <output id="angular-model"></output>
+    </app-root>
+    <script>
+      const model = { phone: '', city: '' };
+      document.querySelector('#angular-form').addEventListener('input', (event) => {
+        if (event.target instanceof HTMLInputElement) {
+          model[event.target.getAttribute('formControlName')] = event.target.value;
+          document.querySelector('#angular-model').textContent = JSON.stringify(model);
+        }
+      });
+    </script>
+  </body>
+</html>

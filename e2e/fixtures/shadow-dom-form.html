@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Shadow DOM Fixture</title>
+  </head>
+  <body>
+    <outer-profile id="outer-profile"></outer-profile>
+    <script>
+      const outerHost = document.querySelector('#outer-profile');
+      const outerRoot = outerHost.attachShadow({ mode: 'open' });
+      outerRoot.innerHTML = '<inner-profile id="inner-profile"></inner-profile>';
+      const innerHost = outerRoot.querySelector('#inner-profile');
+      const innerRoot = innerHost.attachShadow({ mode: 'open' });
+      innerRoot.innerHTML = `
+        <form id="shadow-form">
+          <label for="shadow-linkedin">LinkedIn</label>
+          <input id="shadow-linkedin" name="linkedIn" />
+          <label for="shadow-github">GitHub</label>
+          <input id="shadow-github" name="github" />
+        </form>
+      `;
+    </script>
+  </body>
+</html>

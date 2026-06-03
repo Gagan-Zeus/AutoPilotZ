@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Multi-step Fixture</title>
+  </head>
+  <body>
+    <form id="multi-step-form">
+      <section id="step-1">
+        <h2>Step 1</h2>
+        <label for="multi-email">Email</label>
+        <input id="multi-email" name="email" type="email" />
+        <button id="next-step" type="button">Next</button>
+      </section>
+      <section id="step-2" hidden>
+        <h2>Step 2</h2>
+        <label for="multi-phone">Phone</label>
+        <input id="multi-phone" name="phone" type="tel" />
+      </section>
+    </form>
+    <script>
+      document.querySelector('#next-step').addEventListener('click', () => {
+        document.querySelector('#step-1').hidden = true;
+        document.querySelector('#step-2').hidden = false;
+      });
+    </script>
+  </body>
+</html>

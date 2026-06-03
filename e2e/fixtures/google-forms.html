@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Google Forms Fixture</title>
+  </head>
+  <body>
+    <main>
+      <h1>Google Forms application</h1>
+      <form id="google-form" aria-label="Google Forms candidate profile">
+        <div role="listitem" class="freebirdFormviewerViewItemsItemItem">
+          <div role="heading" aria-level="2">Contact details</div>
+          <label for="gf-first-name">First name</label>
+          <input id="gf-first-name" name="entry.100001" autocomplete="given-name" required />
+        </div>
+        <div role="listitem" class="freebirdFormviewerViewItemsItemItem">
+          <label for="gf-email">Email address</label>
+          <input id="gf-email" name="entry.100002" type="email" autocomplete="email" required />
+          <div id="gf-email-hint">Use the email you check every day.</div>
+        </div>
+        <fieldset role="radiogroup" aria-label="Contact preference">
+          <legend>Contact preference</legend>
+          <label><input type="radio" name="entry.100003" value="email" /> Email</label>
+          <label><input type="radio" name="entry.100003" value="phone" /> Phone</label>
+        </fieldset>
+      </form>
+    </main>
+  </body>
+</html>

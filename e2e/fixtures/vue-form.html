@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Vue Fixture</title>
+  </head>
+  <body>
+    <div id="app" data-v-app>
+      <form id="vue-form">
+        <label for="vue-github">GitHub</label>
+        <input id="vue-github" name="github" v-model="profile.github" data-v-fixture />
+        <label for="vue-country">Country</label>
+        <select id="vue-country" name="country" v-model="profile.country" data-v-fixture>
+          <option value="">Choose</option>
+          <option value="United States">United States</option>
+          <option value="United Kingdom">United Kingdom</option>
+        </select>
+      </form>
+      <output id="vue-model"></output>
+    </div>
+    <script>
+      const model = { github: '', country: '' };
+      document.querySelector('#vue-form').addEventListener('input', updateModel);
+      document.querySelector('#vue-form').addEventListener('change', updateModel);
+      function updateModel(event) {
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+          model[event.target.name] = event.target.value;
+          document.querySelector('#vue-model').textContent = JSON.stringify(model);
+        }
+      }
+    </script>
+  </body>
+</html>

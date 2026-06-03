@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>React Fixture</title>
+  </head>
+  <body>
+    <div id="react-root" data-reactroot>
+      <form id="react-form">
+        <label for="react-email">Email</label>
+        <input id="react-email" name="email" type="email" autocomplete="email" />
+        <label for="react-first-name">First name</label>
+        <input id="react-first-name" name="firstName" autocomplete="given-name" />
+      </form>
+      <output id="react-model"></output>
+    </div>
+    <script>
+      const model = { email: '', firstName: '' };
+      for (const input of document.querySelectorAll('input')) {
+        input.__reactFiber$fixture = {};
+        input._valueTracker = {
+          setValue(value) {
+            input.dataset.previousValue = value;
+          },
+        };
+      }
+      document.querySelector('#react-root').addEventListener('input', (event) => {
+        if (event.target instanceof HTMLInputElement) {
+          model[event.target.name] = event.target.value;
+          document.querySelector('#react-model').textContent = JSON.stringify(model);
+        }
+      });
+    </script>
+  </body>
+</html>
