@@ -15,7 +15,9 @@ export class RecordMappingFeedbackUseCase {
       return this.repository.list();
     }
 
-    return this.repository.upsertMany(inputs.map((input) => createLearnedMappingFeedback(input)));
+    return this.repository.upsertMany(
+      inputs.slice(0, 100).map((input) => createLearnedMappingFeedback(input)),
+    );
   }
 }
 

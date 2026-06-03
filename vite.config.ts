@@ -19,7 +19,7 @@ function manifestPlugin(): Plugin {
       };
       manifest.content_scripts = [
         {
-          matches: ['<all_urls>'],
+          matches: ['http://*/*', 'https://*/*'],
           js: ['content/content-script.js'],
           run_at: 'document_idle',
         },

@@ -10,6 +10,7 @@ import type { NormalizedFormField } from '../../core/entities/FormExtraction';
 import type { ProfileData, VaultProfile } from '../../core/entities/Profile';
 import type { AiMappingCache } from '../../core/ports/AiMappingCache';
 import type { AiMappingClient } from '../../core/ports/AiMappingClient';
+import { sanitizeUntrustedText } from '../../core/security/UntrustedText';
 import { AiMappingPromptBuilder } from './AiMappingPromptBuilder';
 import { InMemoryAiMappingCache } from './InMemoryAiMappingCache';
 
@@ -106,7 +107,11 @@ export class AiMappingEngine {
         fieldId: field.fieldId,
         profilePath: result.profilePath,
         confidence: Math.min(1, Math.max(0, Number(result.confidence.toFixed(2)))),
-        reasoning: result.reasoning.trim() || 'AI mapped the field to a validated profile path.',
+        reasoning:
+          sanitizeUntrustedText(result.reasoning, {
+            maxLength: 240,
+            neutralizeInstructions: true,
+          }) || 'AI mapped the field to a validated profile path.',
       };
     });
   }

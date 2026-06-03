@@ -1,5 +1,6 @@
 import type { DomFieldSignal, FieldMapping } from './Mapping';
 import type { ProfileAttributeValue } from './Profile';
+import { sanitizeUntrustedText } from '../security/UntrustedText';
 
 export type MappingFeedbackKind = 'accepted' | 'rejected' | 'override';
 
@@ -102,15 +103,22 @@ export const fieldLearningFingerprint = (field: DomFieldSignal): string => {
 
 export const fieldLearningSignals = (field: DomFieldSignal): LearningFieldSignals => ({
   kind: field.kind,
-  type: field.type,
-  id: field.id,
-  name: field.name,
-  placeholder: field.placeholder,
-  label: field.label ?? field.context.labelText,
-  ariaLabel: field.ariaLabel,
-  autocomplete: field.autocomplete,
-  sectionHeading: field.sectionHeading ?? field.context.sectionTitle,
-  urlPath: field.context.urlPath,
+  type: sanitizeUntrustedText(field.type, { neutralizeInstructions: true }),
+  id: sanitizeUntrustedText(field.id, { neutralizeInstructions: true }),
+  name: sanitizeUntrustedText(field.name, { neutralizeInstructions: true }),
+  placeholder: sanitizeUntrustedText(field.placeholder, { neutralizeInstructions: true }),
+  label: sanitizeUntrustedText(field.label ?? field.context.labelText, {
+    neutralizeInstructions: true,
+  }),
+  ariaLabel: sanitizeUntrustedText(field.ariaLabel, { neutralizeInstructions: true }),
+  autocomplete: sanitizeUntrustedText(field.autocomplete, { neutralizeInstructions: true }),
+  sectionHeading: sanitizeUntrustedText(field.sectionHeading ?? field.context.sectionTitle, {
+    neutralizeInstructions: true,
+  }),
+  urlPath: sanitizeUntrustedText(field.context.urlPath, {
+    neutralizeInstructions: true,
+    maxLength: 120,
+  }),
 });
 
 export const applyMappingFeedback = ({

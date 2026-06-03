@@ -9,6 +9,7 @@ import type {
   NormalizedFormSection,
   ValidationRule,
 } from '../../core/entities/FormExtraction';
+import { sanitizeUntrustedText } from '../../core/security/UntrustedText';
 
 type ExtractableElement = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | HTMLElement;
 
@@ -1192,11 +1193,10 @@ export class FormExtractionEngine {
   }
 
   private cleanText(value: string | null | undefined): string | undefined {
-    const cleaned = value?.replace(/\s+/g, ' ').trim();
-    if (!cleaned) {
-      return undefined;
-    }
-    return cleaned.length > maxTextLength ? `${cleaned.slice(0, maxTextLength - 1)}...` : cleaned;
+    return sanitizeUntrustedText(value, {
+      maxLength: maxTextLength,
+      neutralizeInstructions: true,
+    });
   }
 
   private escapeCss(value: string): string {
