@@ -49,7 +49,11 @@ const sampleProfileData: ProfileData = {
   ],
 };
 
-export function PopupApp() {
+interface PopupAppProps {
+  surface?: 'popup' | 'sidepanel';
+}
+
+export function PopupApp({ surface = 'popup' }: PopupAppProps) {
   const {
     passphrase,
     profiles,
@@ -111,8 +115,13 @@ export function PopupApp() {
     }
   };
 
+  const shellClassName =
+    surface === 'sidepanel'
+      ? 'min-h-screen w-full overflow-auto bg-panel text-ink'
+      : 'max-h-[640px] w-[480px] overflow-auto bg-panel text-ink';
+
   return (
-    <main className="max-h-[640px] w-[480px] overflow-auto bg-panel text-ink">
+    <main className={shellClassName}>
       <section className="border-b border-slate-200 px-4 py-3">
         <div className="flex items-center justify-between">
           <h1 className="text-base font-semibold">AutoPilotX</h1>

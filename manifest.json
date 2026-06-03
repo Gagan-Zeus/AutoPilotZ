@@ -4,15 +4,18 @@
   "description": "Secure profile vault and AI-assisted form field mapper.",
   "version": "0.1.0",
   "action": {
-    "default_popup": "popup.html",
     "default_title": "AutoPilotX"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "background": {
     "service_worker": "src/background/service-worker.ts",
     "type": "module"
   },
   "options_page": "options.html",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "sidePanel", "scripting", "storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
   },

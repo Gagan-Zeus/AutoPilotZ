@@ -5,6 +5,15 @@ const container = createContainer();
 
 chrome.runtime.onInstalled.addListener(() => {
   void container.updateSettings.execute({});
+  void enableSidePanelOnActionClick();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  void enableSidePanelOnActionClick();
+});
+
+chrome.action.onClicked.addListener((tab) => {
+  void openSidePanel(tab);
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
@@ -87,4 +96,16 @@ async function handleMessage(message: RuntimeMessage): Promise<unknown> {
 
 function assertNever(value: never): RuntimeResponse<never> {
   throw new Error(`Unsupported message: ${JSON.stringify(value)}`);
+}
+
+async function enableSidePanelOnActionClick(): Promise<void> {
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+}
+
+async function openSidePanel(tab: chrome.tabs.Tab): Promise<void> {
+  if (tab.windowId === undefined) {
+    return;
+  }
+
+  await chrome.sidePanel.open({ windowId: tab.windowId });
 }

@@ -18,10 +18,7 @@ function manifestPlugin(): Plugin {
         type: 'module',
       };
       manifest.content_scripts = [];
-      delete manifest.host_permissions;
-      if (process.env.AUTOPILOTX_E2E === 'true') {
-        manifest.host_permissions = ['http://127.0.0.1:4300/*'];
-      }
+      manifest.host_permissions = ['http://*/*', 'https://*/*'];
 
       mkdirSync(dirname(distManifestPath), { recursive: true });
       writeFileSync(distManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -42,6 +39,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, 'popup.html'),
+        sidepanel: resolve(__dirname, 'sidepanel.html'),
         options: resolve(__dirname, 'options.html'),
         'background/service-worker': resolve(__dirname, 'src/background/service-worker.ts'),
         'content/content-script': resolve(__dirname, 'src/content/content-script.ts'),
