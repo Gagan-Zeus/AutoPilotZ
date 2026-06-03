@@ -31,6 +31,17 @@ interface FrameworkHints {
   vueLike: boolean;
 }
 
+interface FillOperation {
+  mapping: FieldMapping;
+  element: FillableElement;
+  value: FillValue;
+}
+
+interface FillRunCache {
+  selectors: Map<string, FillableElement | null>;
+  radioGroups: Map<string, HTMLInputElement[]>;
+}
+
 export class FormFillingEngine {
   constructor(
     private readonly rootDocument: Document = document,
@@ -43,6 +54,11 @@ export class FormFillingEngine {
     options: AutofillSafetyOptions = {},
   ): FillResult {
     const result: FillResult = { applied: 0, requiresConfirmation: [], failed: [] };
+    const runCache: FillRunCache = {
+      selectors: new Map(),
+      radioGroups: new Map(),
+    };
+    const operations: FillOperation[] = [];
 
     for (const mapping of mappings) {
       const value = values[mapping.profileKey];
@@ -55,7 +71,7 @@ export class FormFillingEngine {
         continue;
       }
 
-      const element = this.findMappedElement(mapping.selector);
+      const element = this.findMappedElement(mapping.selector, runCache);
       if (!element) {
         result.failed.push({
           selector: mapping.selector,
@@ -65,6 +81,11 @@ export class FormFillingEngine {
         continue;
       }
 
+      operations.push({ mapping, element, value });
+    }
+
+    for (const operation of operations) {
+      const { mapping, element, value } = operation;
       const safetyDecision = this.safetyPolicy.assess(mapping, element, options);
       if (!safetyDecision.allowed) {
         if (safetyDecision.block) {
@@ -73,7 +94,7 @@ export class FormFillingEngine {
         continue;
       }
 
-      const applied = this.fillElement(element, value);
+      const applied = this.fillElement(element, value, runCache);
       if (!applied) {
         result.failed.push({
           selector: mapping.selector,
@@ -90,7 +111,11 @@ export class FormFillingEngine {
     return result;
   }
 
-  findMappedElement(selector: string): FillableElement | null {
+  findMappedElement(selector: string, cache?: FillRunCache): FillableElement | null {
+    if (cache?.selectors.has(selector)) {
+      return cache.selectors.get(selector) ?? null;
+    }
+
     const selectorParts = selector.split('>>>').map((part) => part.trim());
     let root: Document | ShadowRoot = this.rootDocument;
     let element: Element | null = null;
@@ -98,22 +123,26 @@ export class FormFillingEngine {
     for (const selectorPart of selectorParts) {
       element = root.querySelector(selectorPart);
       if (!element) {
+        cache?.selectors.set(selector, null);
         return null;
       }
       if (selectorPart !== selectorParts.at(-1)) {
         if (!(element instanceof HTMLElement) || !element.shadowRoot) {
+          cache?.selectors.set(selector, null);
           return null;
         }
         root = element.shadowRoot;
       }
     }
 
-    return this.isFillableElement(element) ? element : null;
+    const fillable = this.isFillableElement(element) ? element : null;
+    cache?.selectors.set(selector, fillable);
+    return fillable;
   }
 
-  private fillElement(element: FillableElement, value: FillValue): boolean {
+  private fillElement(element: FillableElement, value: FillValue, cache: FillRunCache): boolean {
     if (element instanceof HTMLInputElement) {
-      return this.fillInput(element, value);
+      return this.fillInput(element, value, cache);
     }
 
     if (element instanceof HTMLTextAreaElement) {
@@ -135,12 +164,12 @@ export class FormFillingEngine {
     return false;
   }
 
-  private fillInput(input: HTMLInputElement, value: FillValue): boolean {
+  private fillInput(input: HTMLInputElement, value: FillValue, cache: FillRunCache): boolean {
     switch (input.type) {
       case 'checkbox':
         return this.fillCheckbox(input, value);
       case 'radio':
-        return this.fillRadio(input, value);
+        return this.fillRadio(input, value, cache);
       default:
         this.setNativeValue(input, String(value));
         this.dispatchFrameworkEvents(input);
@@ -160,16 +189,23 @@ export class FormFillingEngine {
     return true;
   }
 
-  private fillRadio(input: HTMLInputElement, value: FillValue): boolean {
+  private fillRadio(input: HTMLInputElement, value: FillValue, cache: FillRunCache): boolean {
     const targetValue = String(value);
     const root = input.getRootNode() as Document | ShadowRoot;
-    const group = input.name
-      ? Array.from(
-          root.querySelectorAll<HTMLInputElement>(
-            `input[type="radio"][name="${this.escapeCss(input.name)}"]`,
-          ),
-        )
-      : [input];
+    const groupKey = input.name
+      ? `${this.rootKey(root)}:radio:${input.name}`
+      : `${this.rootKey(root)}:radio:${this.elementKey(input)}`;
+    const cachedGroup = cache.radioGroups.get(groupKey);
+    const group =
+      cachedGroup ??
+      (input.name
+        ? Array.from(
+            root.querySelectorAll<HTMLInputElement>(
+              `input[type="radio"][name="${this.escapeCss(input.name)}"]`,
+            ),
+          )
+        : [input]);
+    cache.radioGroups.set(groupKey, group);
     const target = group.find((candidate) => candidate.value === targetValue) ?? input;
 
     for (const candidate of group) {
@@ -387,5 +423,13 @@ export class FormFillingEngine {
     return this.rootDocument.defaultView?.CSS?.escape
       ? this.rootDocument.defaultView.CSS.escape(value)
       : value.replace(/["\\#.:,[\]>+~*^$|= ]/g, '\\$&');
+  }
+
+  private rootKey(root: Document | ShadowRoot): string {
+    return root instanceof ShadowRoot ? this.elementKey(root.host) : 'document';
+  }
+
+  private elementKey(element: Element): string {
+    return element.id || element.getAttribute('name') || element.tagName;
   }
 }

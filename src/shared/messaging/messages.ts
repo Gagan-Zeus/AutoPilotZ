@@ -1,4 +1,8 @@
 import type { ExtensionSettings } from '../../core/entities/Settings';
+import type {
+  LearnedMappingFeedback,
+  MappingFeedbackInput,
+} from '../../core/entities/FeedbackLearning';
 import type { DomFieldSignal, FieldMapping } from '../../core/entities/Mapping';
 import type {
   FieldExtractionResult,
@@ -35,6 +39,9 @@ export type RuntimeMessage =
       fields: DomFieldSignal[];
       profileAttributes: VaultProfile['attributes'];
     }
+  | { type: 'LEARNING_RECORD_FEEDBACK'; feedback: MappingFeedbackInput[] }
+  | { type: 'LEARNING_LIST_FEEDBACK' }
+  | { type: 'LEARNING_CLEAR_FEEDBACK' }
   | { type: 'SETTINGS_GET' }
   | { type: 'SETTINGS_UPDATE'; settings: Partial<ExtensionSettings> };
 
@@ -58,6 +65,7 @@ export type ValidateProfileResponse = ProfileValidationResult;
 export type ExtractFormJsonResponse = NormalizedFormExtraction;
 export type ExtractFieldContextsResponse = FieldExtractionResult[];
 export type PageMonitorSnapshotResponse = PageMonitorSnapshot;
+export type ListMappingFeedbackResponse = LearnedMappingFeedback[];
 
 export const sendRuntimeMessage = async <T>(message: RuntimeMessage): Promise<T> => {
   const response: RuntimeResponse<T> = await chrome.runtime.sendMessage(message);

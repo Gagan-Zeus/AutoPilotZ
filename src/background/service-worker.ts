@@ -59,12 +59,23 @@ async function handleMessage(message: RuntimeMessage): Promise<unknown> {
       if (!settings.aiMappingEnabled) {
         return [];
       }
-      return container.mapFields.execute({
+      const request = {
         fields: message.fields,
         profileAttributes: message.profileAttributes,
         minConfidence: settings.minConfidence,
+      };
+      const mappings = await container.mapFields.execute(request);
+      return container.applyMappingFeedback.execute({
+        ...request,
+        mappings,
       });
     }
+    case 'LEARNING_RECORD_FEEDBACK':
+      return container.recordMappingFeedback.execute(message.feedback);
+    case 'LEARNING_LIST_FEEDBACK':
+      return container.listMappingFeedback.execute();
+    case 'LEARNING_CLEAR_FEEDBACK':
+      return container.clearMappingFeedback.execute();
     case 'SETTINGS_GET':
       return container.getSettings.execute();
     case 'SETTINGS_UPDATE':

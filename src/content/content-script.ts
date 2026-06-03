@@ -3,11 +3,9 @@ import { FormFillingEngine } from './form-filling/FormFillingEngine';
 import { FormExtractionEngine } from './form-extraction/FormExtractionEngine';
 import { PageMonitor } from './page-monitoring/PageMonitor';
 
-const formExtractionEngine = new FormExtractionEngine(document);
-const formFillingEngine = new FormFillingEngine(document);
-const pageMonitor = new PageMonitor(document);
-formExtractionEngine.startObserving();
-pageMonitor.start();
+let formExtractionEngine: FormExtractionEngine | undefined;
+let formFillingEngine: FormFillingEngine | undefined;
+let pageMonitor: PageMonitor | undefined;
 
 chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResponse) => {
   try {
@@ -25,15 +23,15 @@ chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResp
 function handleMessage(message: ContentMessage): unknown {
   switch (message.type) {
     case 'CONTENT_EXTRACT_FIELDS':
-      return formExtractionEngine.extract().fields;
+      return getFormExtractionEngine().extract().fields;
     case 'CONTENT_EXTRACT_FIELD_CONTEXTS':
-      return formExtractionEngine.extract().fieldContexts;
+      return getFormExtractionEngine().extract().fieldContexts;
     case 'CONTENT_EXTRACT_FORM_JSON':
-      return formExtractionEngine.extract();
+      return getFormExtractionEngine().extract();
     case 'CONTENT_PAGE_MONITOR_SNAPSHOT':
-      return pageMonitor.snapshot();
+      return getPageMonitor().snapshot();
     case 'CONTENT_APPLY_MAPPINGS':
-      return formFillingEngine.applyMappings(message.mappings, message.values, {
+      return getFormFillingEngine().applyMappings(message.mappings, message.values, {
         confirmedSensitiveFieldIds: message.confirmedSensitiveFieldIds,
         confirmedSensitiveProfileKeys: message.confirmedSensitiveProfileKeys,
         confirmedSensitiveSelectors: message.confirmedSensitiveSelectors,
@@ -41,6 +39,27 @@ function handleMessage(message: ContentMessage): unknown {
     default:
       return assertNever(message);
   }
+}
+
+function getFormExtractionEngine(): FormExtractionEngine {
+  if (!formExtractionEngine) {
+    formExtractionEngine = new FormExtractionEngine(document);
+    formExtractionEngine.startObserving();
+  }
+  return formExtractionEngine;
+}
+
+function getFormFillingEngine(): FormFillingEngine {
+  formFillingEngine ??= new FormFillingEngine(document);
+  return formFillingEngine;
+}
+
+function getPageMonitor(): PageMonitor {
+  if (!pageMonitor) {
+    pageMonitor = new PageMonitor(document);
+    pageMonitor.start();
+  }
+  return pageMonitor;
 }
 
 function assertNever(value: never): never {

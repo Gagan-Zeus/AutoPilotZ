@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createReviewItems, previewAttributeValue, reviewItemToMapping } from '../src/popup/review';
+import {
+  createReviewItems,
+  previewAttributeValue,
+  reviewItemToFeedbackInputs,
+  reviewItemToMapping,
+} from '../src/popup/review';
 import { field } from './field-test-utils';
 
 describe('popup review helpers', () => {
@@ -74,5 +79,38 @@ describe('popup review helpers', () => {
       confidence: 0.7,
       reason: 'User edited mapping from preferredName to firstName.',
     });
+  });
+
+  it('converts review decisions into local feedback records', () => {
+    const item = createReviewItems(
+      [field({ fieldId: 'name-field', selector: '#name', label: 'Name' })],
+      [
+        {
+          fieldId: 'name-field',
+          selector: '#name',
+          profileKey: 'preferredName',
+          confidence: 0.72,
+          reason: 'Ambiguous name.',
+        },
+      ],
+      { firstName: 'Ada', preferredName: 'Ada' },
+    )[0];
+
+    if (!item) {
+      throw new Error('Expected review item');
+    }
+
+    expect(
+      reviewItemToFeedbackInputs({ ...item, editedProfileKey: 'firstName' }, 'accepted').map(
+        (feedback) => feedback.kind,
+      ),
+    ).toEqual(['accepted', 'override']);
+    expect(reviewItemToFeedbackInputs(item, 'rejected')).toEqual([
+      expect.objectContaining({
+        kind: 'rejected',
+        selector: '#name',
+        profileKey: 'preferredName',
+      }),
+    ]);
   });
 });

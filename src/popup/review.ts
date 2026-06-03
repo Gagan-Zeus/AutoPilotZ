@@ -1,3 +1,4 @@
+import type { MappingFeedbackInput } from '../core/entities/FeedbackLearning';
 import type { DomFieldSignal, FieldMapping } from '../core/entities/Mapping';
 import type { ProfileAttributeValue } from '../core/entities/Profile';
 
@@ -15,6 +16,7 @@ export interface MappingReviewItem {
   reason: string;
   valuePreview: string;
   status: ReviewItemStatus;
+  field?: DomFieldSignal;
 }
 
 export type ProfileAttributes = Record<string, ProfileAttributeValue>;
@@ -42,6 +44,7 @@ export const createReviewItems = (
       reason: mapping.reason,
       valuePreview: previewAttributeValue(profileKey, attributes[profileKey]),
       status: 'pending',
+      field,
     };
   });
 };
@@ -56,6 +59,62 @@ export const reviewItemToMapping = (item: MappingReviewItem): FieldMapping => ({
       ? item.reason
       : `User edited mapping from ${item.detectedProfileKey} to ${item.editedProfileKey}.`,
 });
+
+export const reviewItemToFeedbackInputs = (
+  item: MappingReviewItem,
+  status: ReviewItemStatus,
+): MappingFeedbackInput[] => {
+  if (!item.field) {
+    return [];
+  }
+
+  if (status === 'rejected') {
+    return [
+      {
+        kind: 'rejected',
+        field: item.field,
+        selector: item.selector,
+        fieldId: item.fieldId,
+        profileKey: item.editedProfileKey,
+        originalProfileKey: item.detectedProfileKey,
+        confidence: item.confidence,
+        reason: item.reason,
+      },
+    ];
+  }
+
+  if (status !== 'accepted') {
+    return [];
+  }
+
+  const accepted: MappingFeedbackInput = {
+    kind: 'accepted',
+    field: item.field,
+    selector: item.selector,
+    fieldId: item.fieldId,
+    profileKey: item.editedProfileKey,
+    confidence: item.confidence,
+    reason: item.reason,
+  };
+
+  if (item.editedProfileKey === item.detectedProfileKey) {
+    return [accepted];
+  }
+
+  return [
+    accepted,
+    {
+      kind: 'override',
+      field: item.field,
+      selector: item.selector,
+      fieldId: item.fieldId,
+      profileKey: item.editedProfileKey,
+      originalProfileKey: item.detectedProfileKey,
+      confidence: item.confidence,
+      reason: `User override from ${item.detectedProfileKey} to ${item.editedProfileKey}.`,
+    },
+  ];
+};
 
 export const previewAttributeValue = (
   profileKey: string,

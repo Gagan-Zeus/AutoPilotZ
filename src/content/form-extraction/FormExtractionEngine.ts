@@ -23,6 +23,18 @@ interface FieldGroup {
   controls: HTMLInputElement[];
 }
 
+interface ExtractionCacheEntry {
+  version: number;
+  href: string;
+  title: string;
+  extraction: NormalizedFormExtraction;
+}
+
+export interface FormExtractionEngineOptions {
+  cacheEnabled: boolean;
+  mutationDebounceMs: number;
+}
+
 const fieldSelector = [
   'input',
   'select',
@@ -33,16 +45,41 @@ const fieldSelector = [
 const labelSelector = 'label, [aria-label], [aria-labelledby]';
 const sectionSelector = 'h1,h2,h3,h4,h5,h6,legend,[role="heading"]';
 const maxTextLength = 160;
+const defaultOptions: FormExtractionEngineOptions = {
+  cacheEnabled: true,
+  mutationDebounceMs: 0,
+};
 
 export class FormExtractionEngine {
   private observer?: MutationObserver;
   private readonly shadowRootObservers = new Map<ShadowRoot, MutationObserver>();
+  private selectorCache = new WeakMap<Element, string>();
+  private labelCache = new WeakMap<Element, string | undefined>();
+  private sectionHeadingCache = new WeakMap<Element, string | undefined>();
+  private nearbyTextCache = new WeakMap<Element, string | undefined>();
+  private surroundingTextCache = new WeakMap<Element, string | undefined>();
+  private formTitleCache = new WeakMap<Element, string | undefined>();
+  private formTitleByFormCache = new WeakMap<Element, string | undefined>();
+  private sectionHeadingByFormCache = new WeakMap<Element, string | undefined>();
+  private rootLabelIndex = new WeakMap<Document | ShadowRoot, Map<string, string>>();
   private originalAttachShadow?: typeof Element.prototype.attachShadow;
+  private mutationDebounceTimer?: number;
+  private cachedExtraction?: ExtractionCacheEntry;
   private version = 0;
+  private readonly options: FormExtractionEngineOptions;
 
-  constructor(private readonly rootDocument: Document = document) {}
+  constructor(
+    private readonly rootDocument: Document = document,
+    options: Partial<FormExtractionEngineOptions> = {},
+  ) {
+    this.options = { ...defaultOptions, ...options };
+  }
 
   extract(): NormalizedFormExtraction {
+    if (this.cachedExtraction && this.canUseCachedExtraction()) {
+      return this.cachedExtraction.extraction;
+    }
+
     const traversed = this.traverseComposedTree();
     const controls = traversed
       .filter((item) => item.element.matches(fieldSelector))
@@ -75,7 +112,7 @@ export class FormExtractionEngine {
 
     const sections = this.extractSections(fields);
 
-    return {
+    const extraction: NormalizedFormExtraction = {
       schemaVersion: 1,
       url: this.rootDocument.location.href,
       title: this.rootDocument.title,
@@ -95,6 +132,15 @@ export class FormExtractionEngine {
         checkboxGroups: fields.filter((field) => field.kind === 'checkbox-group').length,
       },
     };
+
+    this.cachedExtraction = {
+      version: this.version,
+      href: this.rootDocument.location.href,
+      title: this.rootDocument.title,
+      extraction,
+    };
+
+    return extraction;
   }
 
   startObserving(onChange?: () => void): () => void {
@@ -110,6 +156,7 @@ export class FormExtractionEngine {
   stopObserving(): void {
     this.observer?.disconnect();
     this.observer = undefined;
+    this.clearMutationDebounceTimer();
     for (const observer of this.shadowRootObservers.values()) {
       observer.disconnect();
     }
@@ -121,6 +168,61 @@ export class FormExtractionEngine {
     return this.version;
   }
 
+  invalidateCache(): void {
+    this.version += 1;
+    this.cachedExtraction = undefined;
+    this.resetExtractionCaches();
+  }
+
+  private canUseCachedExtraction(): boolean {
+    return Boolean(
+      this.options.cacheEnabled &&
+      this.cachedExtraction &&
+      this.cachedExtraction.version === this.version &&
+      this.cachedExtraction.href === this.rootDocument.location.href &&
+      this.cachedExtraction.title === this.rootDocument.title,
+    );
+  }
+
+  private scheduleInvalidation(onChange?: () => void): void {
+    this.cachedExtraction = undefined;
+    if (this.mutationDebounceTimer !== undefined) {
+      return;
+    }
+
+    const view = this.rootDocument.defaultView;
+    if (!view || this.options.mutationDebounceMs <= 0) {
+      this.invalidateCache();
+      onChange?.();
+      return;
+    }
+
+    this.mutationDebounceTimer = view.setTimeout(() => {
+      this.clearMutationDebounceTimer();
+      this.invalidateCache();
+      onChange?.();
+    }, this.options.mutationDebounceMs);
+  }
+
+  private clearMutationDebounceTimer(): void {
+    if (this.mutationDebounceTimer !== undefined) {
+      this.rootDocument.defaultView?.clearTimeout(this.mutationDebounceTimer);
+      this.mutationDebounceTimer = undefined;
+    }
+  }
+
+  private resetExtractionCaches(): void {
+    this.selectorCache = new WeakMap();
+    this.labelCache = new WeakMap();
+    this.sectionHeadingCache = new WeakMap();
+    this.nearbyTextCache = new WeakMap();
+    this.surroundingTextCache = new WeakMap();
+    this.formTitleCache = new WeakMap();
+    this.formTitleByFormCache = new WeakMap();
+    this.sectionHeadingByFormCache = new WeakMap();
+    this.rootLabelIndex = new WeakMap();
+  }
+
   private createMutationObserver(onChange?: () => void): MutationObserver {
     return new MutationObserver((mutations) => {
       for (const mutation of mutations) {
@@ -128,8 +230,7 @@ export class FormExtractionEngine {
       }
 
       if (mutations.some((mutation) => this.mutationCanAffectForms(mutation))) {
-        this.version += 1;
-        onChange?.();
+        this.scheduleInvalidation(onChange);
       }
     });
   }
@@ -218,8 +319,7 @@ export class FormExtractionEngine {
     const observeShadowRoot = (shadowRoot: ShadowRoot) =>
       this.observeShadowRoot(shadowRoot, onChange);
     const notifyChange = () => {
-      this.version += 1;
-      onChange?.();
+      this.scheduleInvalidation(onChange);
     };
 
     Element.prototype.attachShadow = function attachShadow(
@@ -334,7 +434,7 @@ export class FormExtractionEngine {
   private traverseComposedTree(): TraversedElement[] {
     const result: TraversedElement[] = [];
     const visit = (root: ParentNode, shadowDom: boolean) => {
-      for (const element of Array.from(root.children)) {
+      for (const element of root.children) {
         result.push({ element, shadowDom });
         const shadowRoot = this.openShadowRoot(element);
         if (shadowRoot) {
@@ -469,6 +569,10 @@ export class FormExtractionEngine {
   }
 
   private findLabel(element: Element): string | undefined {
+    if (this.labelCache.has(element)) {
+      return this.labelCache.get(element);
+    }
+
     const ariaLabelledBy = element.getAttribute('aria-labelledby');
     if (ariaLabelledBy) {
       const root = element.getRootNode() as Document | ShadowRoot;
@@ -479,30 +583,36 @@ export class FormExtractionEngine {
         .filter(Boolean)
         .join(' ');
       if (label) {
+        this.labelCache.set(element, label);
         return label;
       }
     }
 
     if (element.id) {
       const root = element.getRootNode() as Document | ShadowRoot;
-      const label = root.querySelector<HTMLLabelElement>(
-        `label[for="${this.escapeCss(element.id)}"]`,
-      );
-      if (label?.textContent?.trim()) {
-        return this.cleanText(label.textContent);
+      const indexedLabel = this.labelIndex(root).get(element.id);
+      if (indexedLabel) {
+        const text = this.cleanText(indexedLabel);
+        this.labelCache.set(element, text);
+        return text;
       }
     }
 
     const wrappingLabel = element.closest('label');
     if (wrappingLabel?.textContent?.trim()) {
-      return this.cleanText(wrappingLabel.textContent);
+      const text = this.cleanText(wrappingLabel.textContent);
+      this.labelCache.set(element, text);
+      return text;
     }
 
     const labelledAncestor = element.closest(labelSelector);
     if (labelledAncestor?.textContent?.trim()) {
-      return this.cleanText(labelledAncestor.textContent);
+      const text = this.cleanText(labelledAncestor.textContent);
+      this.labelCache.set(element, text);
+      return text;
     }
 
+    this.labelCache.set(element, undefined);
     return undefined;
   }
 
@@ -538,6 +648,10 @@ export class FormExtractionEngine {
   }
 
   private findNearbyText(element: Element): string | undefined {
+    if (this.nearbyTextCache.has(element)) {
+      return this.nearbyTextCache.get(element);
+    }
+
     const candidates: string[] = [];
     const previous = element.previousElementSibling;
     const next = element.nextElementSibling;
@@ -551,7 +665,7 @@ export class FormExtractionEngine {
     }
 
     const parent = element.parentElement;
-    if (parent) {
+    if (parent && this.shouldReadContainerText(parent)) {
       const parentClone = parent.cloneNode(true) as HTMLElement;
       parentClone
         .querySelectorAll('input,select,textarea,button,[contenteditable]')
@@ -570,7 +684,9 @@ export class FormExtractionEngine {
       );
     }
 
-    return this.cleanText(candidates.filter(Boolean).join(' '));
+    const text = this.cleanText(candidates.filter(Boolean).join(' '));
+    this.nearbyTextCache.set(element, text);
+    return text;
   }
 
   private buildContext(
@@ -646,11 +762,16 @@ export class FormExtractionEngine {
   }
 
   private findSurroundingText(element: Element): string | undefined {
+    if (this.surroundingTextCache.has(element)) {
+      return this.surroundingTextCache.get(element);
+    }
+
     const container =
       element.closest(
         'label,fieldset,[role="group"],[role="radiogroup"],.form-group,.field,.control',
       ) ?? element.parentElement;
-    if (!container) {
+    if (!container || !this.shouldReadContainerText(container)) {
+      this.surroundingTextCache.set(element, undefined);
       return undefined;
     }
 
@@ -658,18 +779,35 @@ export class FormExtractionEngine {
     clone
       .querySelectorAll('input,select,textarea,button,[contenteditable],script,style')
       .forEach((node) => node.remove());
-    return this.cleanText(clone.textContent);
+    const text = this.cleanText(clone.textContent);
+    this.surroundingTextCache.set(element, text);
+    return text;
   }
 
   private findFormTitle(element: Element): string | undefined {
+    if (this.formTitleCache.has(element)) {
+      return this.formTitleCache.get(element);
+    }
+
     const form = element.closest('form');
     if (!form) {
-      return this.findSectionHeading(element);
+      const title = this.findSectionHeading(element);
+      this.formTitleCache.set(element, title);
+      return title;
+    }
+
+    if (this.formTitleByFormCache.has(form)) {
+      const title = this.formTitleByFormCache.get(form);
+      this.formTitleCache.set(element, title);
+      return title;
     }
 
     const ariaLabel = form.getAttribute('aria-label');
     if (ariaLabel) {
-      return this.cleanText(ariaLabel);
+      const title = this.cleanText(ariaLabel);
+      this.formTitleByFormCache.set(form, title);
+      this.formTitleCache.set(element, title);
+      return title;
     }
 
     const labelledBy = form.getAttribute('aria-labelledby');
@@ -681,38 +819,73 @@ export class FormExtractionEngine {
         .join(' ');
       const cleaned = this.cleanText(text);
       if (cleaned) {
+        this.formTitleByFormCache.set(form, cleaned);
+        this.formTitleCache.set(element, cleaned);
         return cleaned;
       }
     }
 
     const innerTitle = form.querySelector(sectionSelector);
     if (innerTitle?.textContent?.trim()) {
-      return this.cleanText(innerTitle.textContent);
+      const title = this.cleanText(innerTitle.textContent);
+      this.formTitleByFormCache.set(form, title);
+      this.formTitleCache.set(element, title);
+      return title;
     }
 
     const precedingTitle = this.findPrecedingHeading(form);
     if (precedingTitle) {
+      this.formTitleByFormCache.set(form, precedingTitle);
+      this.formTitleCache.set(element, precedingTitle);
       return precedingTitle;
     }
 
-    return this.cleanText(form.getAttribute('name') ?? form.id);
+    const title = this.cleanText(form.getAttribute('name') ?? form.id);
+    this.formTitleByFormCache.set(form, title);
+    this.formTitleCache.set(element, title);
+    return title;
   }
 
   private findSectionHeading(element: Element): string | undefined {
+    if (this.sectionHeadingCache.has(element)) {
+      return this.sectionHeadingCache.get(element);
+    }
+
     const fieldsetLegend = element.closest('fieldset')?.querySelector('legend');
     if (fieldsetLegend?.textContent?.trim()) {
-      return this.cleanText(fieldsetLegend.textContent);
+      const heading = this.cleanText(fieldsetLegend.textContent);
+      this.sectionHeadingCache.set(element, heading);
+      return heading;
+    }
+
+    const form = element.closest('form');
+    if (form && this.sectionHeadingByFormCache.has(form)) {
+      const heading = this.sectionHeadingByFormCache.get(form);
+      this.sectionHeadingCache.set(element, heading);
+      return heading;
+    }
+
+    const formHeading = form?.querySelector(sectionSelector);
+    if (formHeading?.textContent?.trim()) {
+      const heading = this.cleanText(formHeading.textContent);
+      if (form) {
+        this.sectionHeadingByFormCache.set(form, heading);
+      }
+      this.sectionHeadingCache.set(element, heading);
+      return heading;
     }
 
     let current: Element | null = element;
     while (current && current !== this.rootDocument.body) {
       const heading = this.findPrecedingHeading(current);
       if (heading) {
+        this.sectionHeadingCache.set(element, heading);
         return heading;
       }
       current = current.parentElement;
     }
 
+    this.sectionHeadingCache.set(element, undefined);
     return undefined;
   }
 
@@ -766,12 +939,19 @@ export class FormExtractionEngine {
   }
 
   private stableSelector(element: Element): string {
+    const cached = this.selectorCache.get(element);
+    if (cached) {
+      return cached;
+    }
+
     const root = element.getRootNode();
     const localSelector = this.localStableSelector(element);
-    if (root instanceof ShadowRoot) {
-      return `${this.stableSelector(root.host)} >>> ${localSelector}`;
-    }
-    return localSelector;
+    const selector =
+      root instanceof ShadowRoot
+        ? `${this.stableSelector(root.host)} >>> ${localSelector}`
+        : localSelector;
+    this.selectorCache.set(element, selector);
+    return selector;
   }
 
   private localStableSelector(element: Element): string {
@@ -861,11 +1041,19 @@ export class FormExtractionEngine {
     if (element.hasAttribute('hidden')) {
       return false;
     }
-    const style = this.rootDocument.defaultView?.getComputedStyle(element);
-    if (style?.display === 'none' || style?.visibility === 'hidden') {
+    const inlineStyle = element.getAttribute('style');
+    if (inlineStyle && /display\s*:\s*none|visibility\s*:\s*hidden/i.test(inlineStyle)) {
       return false;
     }
     return true;
+  }
+
+  private shouldReadContainerText(element: Element): boolean {
+    if (['FORM', 'BODY', 'MAIN'].includes(element.tagName)) {
+      return false;
+    }
+
+    return element.childElementCount <= 12 && (element.textContent?.length ?? 0) <= 2000;
   }
 
   private isDisabled(element: ExtractableElement): boolean {
@@ -959,6 +1147,23 @@ export class FormExtractionEngine {
 
   private getAttribute(element: Element, name: string): string | undefined {
     return this.cleanText(element.getAttribute(name));
+  }
+
+  private labelIndex(root: Document | ShadowRoot): Map<string, string> {
+    const cached = this.rootLabelIndex.get(root);
+    if (cached) {
+      return cached;
+    }
+
+    const labels = new Map<string, string>();
+    for (const label of Array.from(root.querySelectorAll<HTMLLabelElement>('label[for]'))) {
+      const targetId = label.getAttribute('for');
+      if (targetId && label.textContent) {
+        labels.set(targetId, label.textContent);
+      }
+    }
+    this.rootLabelIndex.set(root, labels);
+    return labels;
   }
 
   private attributeRuleValue(element: Element, attribute: string): string | number | boolean {

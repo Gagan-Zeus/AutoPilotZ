@@ -11,6 +11,7 @@ import { sendRuntimeMessage, sendTabMessage } from '../shared/messaging/messages
 import {
   createReviewItems,
   previewAttributeValue,
+  reviewItemToFeedbackInputs,
   reviewItemToMapping,
   type MappingReviewItem,
 } from './review';
@@ -205,6 +206,10 @@ export const usePopupStore = create<PopupState>((set, get) => ({
     }
   },
   acceptReviewItem: (id) => {
+    const item = get().reviewItems.find((candidate) => candidate.id === id);
+    if (item) {
+      void recordReviewFeedback(item, 'accepted');
+    }
     set((state) => ({
       reviewItems: state.reviewItems.map((item) =>
         item.id === id ? { ...item, status: 'accepted' } : item,
@@ -212,6 +217,10 @@ export const usePopupStore = create<PopupState>((set, get) => ({
     }));
   },
   rejectReviewItem: (id) => {
+    const item = get().reviewItems.find((candidate) => candidate.id === id);
+    if (item) {
+      void recordReviewFeedback(item, 'rejected');
+    }
     set((state) => ({
       reviewItems: state.reviewItems.map((item) =>
         item.id === id ? { ...item, status: 'rejected' } : item,
@@ -223,6 +232,10 @@ export const usePopupStore = create<PopupState>((set, get) => ({
       (profile) => profile.id === get().selectedProfileId,
     );
     const attributes = selectedProfile?.attributes ?? {};
+    const item = get().reviewItems.find((candidate) => candidate.id === id);
+    if (item) {
+      void recordReviewFeedback({ ...item, editedProfileKey: profileKey }, 'accepted');
+    }
     set((state) => ({
       reviewItems: state.reviewItems.map((item) =>
         item.id === id
@@ -287,3 +300,22 @@ export const usePopupStore = create<PopupState>((set, get) => ({
     }
   },
 }));
+
+const recordReviewFeedback = async (
+  item: MappingReviewItem,
+  status: 'accepted' | 'rejected',
+): Promise<void> => {
+  const feedback = reviewItemToFeedbackInputs(item, status);
+  if (feedback.length === 0) {
+    return;
+  }
+
+  try {
+    await sendRuntimeMessage({
+      type: 'LEARNING_RECORD_FEEDBACK',
+      feedback,
+    });
+  } catch {
+    // Learning is opportunistic local state; review actions should still work if storage fails.
+  }
+};
