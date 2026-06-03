@@ -10,8 +10,11 @@ import { ExportProfilesUseCase } from '../src/core/usecases/ExportProfilesUseCas
 import { ImportProfilesUseCase } from '../src/core/usecases/ImportProfilesUseCase';
 import { SaveProfileUseCase } from '../src/core/usecases/SaveProfileUseCase';
 import { SearchProfilesUseCase } from '../src/core/usecases/SearchProfilesUseCase';
+import { UpdateSettingsUseCase } from '../src/core/usecases/SettingsUseCases';
 import { SwitchProfileUseCase } from '../src/core/usecases/SwitchProfileUseCase';
 import { ValidateProfileUseCase } from '../src/core/usecases/ValidateProfileUseCase';
+import type { SettingsRepository } from '../src/core/ports/SettingsRepository';
+import { defaultSettings, type ExtensionSettings } from '../src/core/entities/Settings';
 import { makeProfileData } from './profile-fixtures';
 
 class InMemoryVaultRepository implements ProfileVaultRepository {
@@ -22,6 +25,7 @@ class InMemoryVaultRepository implements ProfileVaultRepository {
   }
 
   save(profile: VaultProfile): Promise<VaultProfile> {
+    this.profiles = this.profiles.filter((candidate) => candidate.id !== profile.id);
     this.profiles.push(profile);
     return Promise.resolve(profile);
   }
@@ -29,6 +33,19 @@ class InMemoryVaultRepository implements ProfileVaultRepository {
   remove(id: string): Promise<void> {
     this.profiles = this.profiles.filter((profile) => profile.id !== id);
     return Promise.resolve();
+  }
+}
+
+class InMemorySettingsRepository implements SettingsRepository {
+  settings = { ...defaultSettings };
+
+  get(): Promise<ExtensionSettings> {
+    return Promise.resolve(this.settings);
+  }
+
+  update(settings: Partial<ExtensionSettings>): Promise<ExtensionSettings> {
+    this.settings = { ...this.settings, ...settings };
+    return Promise.resolve(this.settings);
   }
 }
 
@@ -79,6 +96,27 @@ describe('SaveProfileUseCase', () => {
     expect(profile.attributes.fullName).toBe('Ada Lovelace');
     expect(repository.profiles).toHaveLength(1);
   });
+
+  it('preserves createdAt when updating an existing profile', async () => {
+    const repository = new InMemoryVaultRepository();
+    const useCase = new SaveProfileUseCase(repository);
+    const original = await useCase.execute({
+      label: 'Default',
+      data: makeProfileData(),
+      passphrase: 'long-enough-passphrase',
+    });
+
+    const updated = await useCase.execute({
+      id: original.id,
+      label: 'Updated',
+      data: makeProfileData({ firstName: 'Grace' }),
+      passphrase: 'long-enough-passphrase',
+    });
+
+    expect(updated.createdAt).toBe(original.createdAt);
+    expect(updated.label).toBe('Updated');
+    expect(repository.profiles).toHaveLength(1);
+  });
 });
 
 describe('ValidateProfileUseCase', () => {
@@ -90,6 +128,32 @@ describe('ValidateProfileUseCase', () => {
     expect(result.valid).toBe(false);
     expect(result.issues).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: 'email' })]),
+    );
+  });
+
+  it('rejects rolled-over calendar dates', () => {
+    const useCase = new ValidateProfileUseCase();
+
+    expect(useCase.execute(makeProfileData({ dateOfBirth: '2024-02-31' })).issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'dateOfBirth' })]),
+    );
+    expect(
+      useCase.execute(
+        makeProfileData({
+          education: [
+            {
+              id: 'education-1',
+              institution: 'University',
+              degree: 'Math',
+              fieldOfStudy: 'Computing',
+              startDate: '2024-13',
+              current: true,
+            },
+          ],
+        }),
+      ).issues,
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'education.0.startDate' })]),
     );
   });
 });
@@ -166,5 +230,62 @@ describe('Import and export profile use cases', () => {
 
     expect(result.imported).toBe(1);
     expect(targetRepository.profiles).toHaveLength(1);
+  });
+
+  it('validates replace-mode imports before removing existing profiles', async () => {
+    const targetRepository = new InMemoryVaultRepository();
+    await new SaveProfileUseCase(targetRepository).execute({
+      label: 'Existing',
+      data: makeProfileData(),
+      passphrase: 'long-enough-passphrase',
+    });
+    const cipher = new FakeVaultBundleCipher();
+    const invalidBundle: ExportedVaultBundle = {
+      version: 1,
+      exportedAt: '2026-01-01T00:00:00.000Z',
+      salt: 'salt',
+      iv: 'iv',
+      encryptedPayload: JSON.stringify({
+        profiles: [
+          {
+            id: 'invalid',
+            label: 'Invalid',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            data: makeProfileData({ email: 'bad-email' }),
+            attributes: {},
+          },
+        ],
+      }),
+    };
+
+    await expect(
+      new ImportProfilesUseCase(targetRepository, cipher).execute({
+        passphrase: 'long-enough-passphrase',
+        bundle: invalidBundle,
+        mode: 'replace',
+      }),
+    ).rejects.toThrow('invalid');
+    expect(targetRepository.profiles).toHaveLength(1);
+    expect(targetRepository.profiles[0]?.label).toBe('Existing');
+  });
+});
+
+describe('SettingsUseCases', () => {
+  it('normalizes and deduplicates allowed origins', async () => {
+    const repository = new InMemorySettingsRepository();
+    const result = await new UpdateSettingsUseCase(repository).execute({
+      allowedOrigins: ['https://example.com/path', 'https://example.com', 'http://localhost:4300'],
+    });
+
+    expect(result.allowedOrigins).toEqual(['https://example.com', 'http://localhost:4300']);
+  });
+
+  it('rejects non-http allowed origins', async () => {
+    await expect(
+      new UpdateSettingsUseCase(new InMemorySettingsRepository()).execute({
+        allowedOrigins: ['chrome://extensions'],
+      }),
+    ).rejects.toThrow('http or https');
   });
 });

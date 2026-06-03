@@ -7,18 +7,26 @@ let formExtractionEngine: FormExtractionEngine | undefined;
 let formFillingEngine: FormFillingEngine | undefined;
 let pageMonitor: PageMonitor | undefined;
 
-chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResponse) => {
-  try {
-    const data = handleMessage(message);
-    sendResponse({ ok: true, data } satisfies RuntimeResponse<unknown>);
-  } catch (error) {
-    sendResponse({
-      ok: false,
-      error: error instanceof Error ? error.message : 'Content script failed.',
-    } satisfies RuntimeResponse<never>);
-  }
-  return false;
-});
+const contentScriptGlobal = globalThis as typeof globalThis & {
+  __autopilotxContentScriptReady?: boolean;
+};
+
+if (!contentScriptGlobal.__autopilotxContentScriptReady) {
+  contentScriptGlobal.__autopilotxContentScriptReady = true;
+
+  chrome.runtime.onMessage.addListener((message: ContentMessage, _sender, sendResponse) => {
+    try {
+      const data = handleMessage(message);
+      sendResponse({ ok: true, data } satisfies RuntimeResponse<unknown>);
+    } catch (error) {
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : 'Content script failed.',
+      } satisfies RuntimeResponse<never>);
+    }
+    return false;
+  });
+}
 
 function handleMessage(message: ContentMessage): unknown {
   switch (message.type) {

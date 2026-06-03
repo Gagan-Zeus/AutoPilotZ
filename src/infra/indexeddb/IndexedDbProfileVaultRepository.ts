@@ -10,6 +10,8 @@ const STORE_NAME = 'profiles';
 const SALT_KEY = 'autopilotx.vaultSalt';
 
 export class IndexedDbProfileVaultRepository implements ProfileVaultRepository {
+  private saltPromise?: Promise<Uint8Array>;
+
   constructor(
     private readonly storage: StorageArea,
     private readonly profileCrypto = new ProfileCrypto(),
@@ -17,44 +19,56 @@ export class IndexedDbProfileVaultRepository implements ProfileVaultRepository {
 
   async list(passphrase: string): Promise<VaultProfile[]> {
     const db = await this.openDatabase();
-    const records = await this.getAllRecords(db);
-    const salt = await this.getOrCreateSalt();
-    const profiles = await Promise.all(
-      records.map((record) =>
-        this.profileCrypto.decryptJson<VaultProfile>(
-          { encryptedPayload: record.encryptedPayload, iv: record.iv },
-          passphrase,
-          salt,
+    try {
+      const records = await this.getAllRecords(db);
+      const salt = await this.getOrCreateSalt();
+      const profiles = await Promise.all(
+        records.map((record) =>
+          this.profileCrypto.decryptJson<VaultProfile>(
+            { encryptedPayload: record.encryptedPayload, iv: record.iv },
+            passphrase,
+            salt,
+          ),
         ),
-      ),
-    );
+      );
 
-    return profiles
-      .map((profile) => ({
-        ...profile,
-        attributes: profileDataToAttributes(profile.data),
-      }))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      return profiles
+        .map((profile) => ({
+          ...profile,
+          attributes: profileDataToAttributes(profile.data),
+        }))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    } finally {
+      db.close();
+    }
   }
 
   async save(profile: VaultProfile, passphrase: string): Promise<VaultProfile> {
     const db = await this.openDatabase();
-    const salt = await this.getOrCreateSalt();
-    const encrypted = await this.profileCrypto.encryptJson(profile, passphrase, salt);
-    const record: EncryptedProfileRecord = {
-      id: profile.id,
-      encryptedPayload: encrypted.encryptedPayload,
-      iv: encrypted.iv,
-      updatedAt: profile.updatedAt,
-    };
+    try {
+      const salt = await this.getOrCreateSalt();
+      const encrypted = await this.profileCrypto.encryptJson(profile, passphrase, salt);
+      const record: EncryptedProfileRecord = {
+        id: profile.id,
+        encryptedPayload: encrypted.encryptedPayload,
+        iv: encrypted.iv,
+        updatedAt: profile.updatedAt,
+      };
 
-    await this.putRecord(db, record);
-    return profile;
+      await this.putRecord(db, record);
+      return profile;
+    } finally {
+      db.close();
+    }
   }
 
   async remove(id: string): Promise<void> {
     const db = await this.openDatabase();
-    await this.deleteRecord(db, id);
+    try {
+      await this.deleteRecord(db, id);
+    } finally {
+      db.close();
+    }
   }
 
   private openDatabase(): Promise<IDBDatabase> {
@@ -115,6 +129,11 @@ export class IndexedDbProfileVaultRepository implements ProfileVaultRepository {
   }
 
   private async getOrCreateSalt(): Promise<Uint8Array> {
+    this.saltPromise ??= this.readOrCreateSalt();
+    return this.saltPromise;
+  }
+
+  private async readOrCreateSalt(): Promise<Uint8Array> {
     const stored = await this.storage.get<Record<string, string | undefined>>(SALT_KEY);
     const existing = stored[SALT_KEY];
     if (existing) {

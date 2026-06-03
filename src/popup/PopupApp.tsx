@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { useMemo, useState } from 'react';
+import type { AutofillSafetyBlock } from '../content/form-filling/AutofillSafetyPolicy';
 import type { ExportedVaultBundle, ProfileData } from '../core/entities/Profile';
 import type { MappingReviewItem } from './review';
 import { usePopupStore } from './store';
@@ -57,10 +58,12 @@ export function PopupApp() {
     exportBundle,
     lastMappings,
     reviewItems,
+    sensitiveBlocks,
     status,
     loading,
     setPassphrase,
     setSearchQuery,
+    setStatus,
     loadProfiles,
     saveProfile,
     switchProfile,
@@ -72,6 +75,7 @@ export function PopupApp() {
     rejectReviewItem,
     editReviewItem,
     applyAcceptedMappings,
+    confirmSensitiveMappings,
   } = usePopupStore();
   const [label, setLabel] = useState('Default');
   const [profileJson, setProfileJson] = useState(JSON.stringify(sampleProfileData, null, 2));
@@ -92,11 +96,19 @@ export function PopupApp() {
 
   const handleSave = (event: FormEvent) => {
     event.preventDefault();
-    void saveProfile(label, JSON.parse(profileJson) as ProfileData, selectedProfile?.id);
+    try {
+      void saveProfile(label, JSON.parse(profileJson) as ProfileData, selectedProfile?.id);
+    } catch {
+      setStatus('Profile JSON is invalid.');
+    }
   };
 
   const handleImport = () => {
-    void importProfiles(JSON.parse(importJson) as ExportedVaultBundle);
+    try {
+      void importProfiles(JSON.parse(importJson) as ExportedVaultBundle);
+    } catch {
+      setStatus('Import bundle JSON is invalid.');
+    }
   };
 
   return (
@@ -233,8 +245,10 @@ export function PopupApp() {
           items={reviewItems}
           loading={loading}
           profileKeys={profileKeys}
+          sensitiveBlocks={sensitiveBlocks}
           onAccept={acceptReviewItem}
           onApply={() => void applyAcceptedMappings()}
+          onConfirmSensitive={() => void confirmSensitiveMappings()}
           onEdit={editReviewItem}
           onReject={rejectReviewItem}
         />
@@ -258,8 +272,10 @@ interface ReviewModeProps {
   items: MappingReviewItem[];
   loading: boolean;
   profileKeys: string[];
+  sensitiveBlocks: AutofillSafetyBlock[];
   onAccept: (id: string) => void;
   onApply: () => void;
+  onConfirmSensitive: () => void;
   onEdit: (id: string, profileKey: string) => void;
   onReject: (id: string) => void;
 }
@@ -269,8 +285,10 @@ function ReviewMode({
   items,
   loading,
   profileKeys,
+  sensitiveBlocks,
   onAccept,
   onApply,
+  onConfirmSensitive,
   onEdit,
   onReject,
 }: ReviewModeProps) {
@@ -291,6 +309,39 @@ function ReviewMode({
           Apply accepted ({acceptedCount})
         </button>
       </div>
+
+      {sensitiveBlocks.length > 0 && (
+        <section className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold">
+                {sensitiveBlocks.length} sensitive field
+                {sensitiveBlocks.length === 1 ? '' : 's'} blocked
+              </p>
+              <p className="mt-1 text-amber-800">
+                Confirm only if you intentionally want AutoPilotX to fill these fields.
+              </p>
+            </div>
+            <button
+              className="shrink-0 rounded bg-amber-900 px-3 py-2 font-semibold text-white disabled:opacity-50"
+              disabled={loading}
+              type="button"
+              onClick={onConfirmSensitive}
+            >
+              Confirm
+            </button>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {sensitiveBlocks.map((block) => (
+              <li key={`${block.selector}:${block.profileKey}`}>
+                <span className="font-medium">{block.profileKey}</span> ·{' '}
+                {block.categories.join(', ')}
+                {block.evidence[0] ? ` · ${block.evidence[0]}` : ''}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <ul className="max-h-72 space-y-2 overflow-auto pr-1">
         {items.map((item) => (

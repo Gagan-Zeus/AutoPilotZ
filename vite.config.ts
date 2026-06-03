@@ -17,14 +17,11 @@ function manifestPlugin(): Plugin {
         service_worker: 'background/service-worker.js',
         type: 'module',
       };
-      manifest.content_scripts = [
-        {
-          matches: ['http://*/*', 'https://*/*'],
-          js: ['content/content-script.js'],
-          run_at: 'document_idle',
-        },
-      ];
-      manifest.host_permissions = ['http://*/*', 'https://*/*'];
+      manifest.content_scripts = [];
+      delete manifest.host_permissions;
+      if (process.env.AUTOPILOTX_E2E === 'true') {
+        manifest.host_permissions = ['http://127.0.0.1:4300/*'];
+      }
 
       mkdirSync(dirname(distManifestPath), { recursive: true });
       writeFileSync(distManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

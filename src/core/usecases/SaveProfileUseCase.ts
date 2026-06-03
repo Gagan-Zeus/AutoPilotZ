@@ -26,10 +26,16 @@ export class SaveProfileUseCase {
       throw new Error(validation.issues.map((issue) => issue.message).join(' '));
     }
 
+    const existingProfile = command.id
+      ? (await this.repository.list(command.passphrase)).find(
+          (profile) => profile.id === command.id,
+        )
+      : undefined;
     const profile = createProfile({
       id: command.id,
       label: command.label,
       data: command.data,
+      createdAt: existingProfile?.createdAt,
     });
 
     return this.repository.save(profile, command.passphrase);

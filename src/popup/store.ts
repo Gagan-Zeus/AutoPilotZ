@@ -1,6 +1,8 @@
 import { create } from 'zustand';
+import type { AutofillSafetyBlock } from '../content/form-filling/AutofillSafetyPolicy';
 import type { DomFieldSignal } from '../core/entities/Mapping';
 import type { FieldMapping } from '../core/entities/Mapping';
+import type { ExtensionSettings } from '../core/entities/Settings';
 import type {
   ExportedVaultBundle,
   ProfileData,
@@ -23,11 +25,13 @@ interface PopupState {
   searchQuery: string;
   lastMappings: FieldMapping[];
   reviewItems: MappingReviewItem[];
+  sensitiveBlocks: AutofillSafetyBlock[];
   exportBundle?: ExportedVaultBundle;
   status: string;
   loading: boolean;
   setPassphrase: (passphrase: string) => void;
   setSearchQuery: (query: string) => void;
+  setStatus: (status: string) => void;
   loadProfiles: () => Promise<void>;
   saveProfile: (label: string, data: ProfileData, id?: string) => Promise<void>;
   selectProfile: (id: string) => void;
@@ -41,6 +45,13 @@ interface PopupState {
   rejectReviewItem: (id: string) => void;
   editReviewItem: (id: string, profileKey: string) => void;
   applyAcceptedMappings: () => Promise<void>;
+  confirmSensitiveMappings: () => Promise<void>;
+}
+
+interface AutofillResult {
+  applied: number;
+  requiresConfirmation: AutofillSafetyBlock[];
+  failed: Array<{ selector: string; profileKey: string; reason: string }>;
 }
 
 export const usePopupStore = create<PopupState>((set, get) => ({
@@ -50,11 +61,13 @@ export const usePopupStore = create<PopupState>((set, get) => ({
   searchQuery: '',
   lastMappings: [],
   reviewItems: [],
+  sensitiveBlocks: [],
   exportBundle: undefined,
   status: 'Locked',
   loading: false,
   setPassphrase: (passphrase) => set({ passphrase }),
-  selectProfile: (id) => set({ selectedProfileId: id, reviewItems: [] }),
+  setStatus: (status) => set({ status }),
+  selectProfile: (id) => set({ selectedProfileId: id, reviewItems: [], sensitiveBlocks: [] }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   loadProfiles: async () => {
     set({ loading: true, status: 'Unlocking vault...' });
@@ -67,6 +80,7 @@ export const usePopupStore = create<PopupState>((set, get) => ({
         profiles,
         selectedProfileId: profiles[0]?.id,
         reviewItems: [],
+        sensitiveBlocks: [],
         status: profiles.length ? `${profiles.length} profile loaded` : 'Vault is empty',
       });
     } catch (error) {
@@ -101,6 +115,7 @@ export const usePopupStore = create<PopupState>((set, get) => ({
       set({
         selectedProfileId: profile.id,
         reviewItems: [],
+        sensitiveBlocks: [],
         status: `Active profile: ${profile.label}`,
       });
     } catch (error) {
@@ -121,6 +136,7 @@ export const usePopupStore = create<PopupState>((set, get) => ({
         profiles,
         selectedProfileId: profiles[0]?.id,
         reviewItems: [],
+        sensitiveBlocks: [],
         status: `${profiles.length} profile${profiles.length === 1 ? '' : 's'} found`,
       });
     } catch (error) {
@@ -183,6 +199,8 @@ export const usePopupStore = create<PopupState>((set, get) => ({
       if (!tab.id) {
         throw new Error('No active tab found.');
       }
+      await assertTabAllowed(tab);
+      await ensureContentScript(tab.id);
 
       const fields = await sendTabMessage<DomFieldSignal[]>(tab.id, {
         type: 'CONTENT_EXTRACT_FIELDS',
@@ -197,6 +215,7 @@ export const usePopupStore = create<PopupState>((set, get) => ({
       set({
         lastMappings: mappings,
         reviewItems,
+        sensitiveBlocks: [],
         status: `${reviewItems.length} mapping${reviewItems.length === 1 ? '' : 's'} ready for review`,
       });
     } catch (error) {
@@ -270,31 +289,88 @@ export const usePopupStore = create<PopupState>((set, get) => ({
       if (!tab.id) {
         throw new Error('No active tab found.');
       }
+      await assertTabAllowed(tab);
+      await ensureContentScript(tab.id);
 
       const acceptedMappings = acceptedItems.map(reviewItemToMapping);
-      const result = await sendTabMessage<{ applied: number; requiresConfirmation: unknown[] }>(
-        tab.id,
-        {
-          type: 'CONTENT_APPLY_MAPPINGS',
-          mappings: acceptedMappings,
-          values: selectedProfile.attributes,
-          confirmedSensitiveFieldIds: acceptedItems
-            .map((item) => item.fieldId)
-            .filter((fieldId): fieldId is string => Boolean(fieldId)),
-          confirmedSensitiveSelectors: acceptedItems.map((item) => item.selector),
-          confirmedSensitiveProfileKeys: acceptedItems.map((item) => item.editedProfileKey),
-        },
-      );
+      const result = await sendTabMessage<AutofillResult>(tab.id, {
+        type: 'CONTENT_APPLY_MAPPINGS',
+        mappings: acceptedMappings,
+        values: selectedProfile.attributes,
+      });
 
       set({
         lastMappings: acceptedMappings,
+        sensitiveBlocks: result.requiresConfirmation,
         status:
           result.requiresConfirmation.length > 0
-            ? `${result.applied} applied; ${result.requiresConfirmation.length} still require confirmation`
+            ? `${result.applied} applied; ${result.requiresConfirmation.length} sensitive field${result.requiresConfirmation.length === 1 ? '' : 's'} require explicit confirmation`
             : `${result.applied} field${result.applied === 1 ? '' : 's'} applied`,
       });
     } catch (error) {
       set({ status: error instanceof Error ? error.message : 'Unable to apply mappings.' });
+    } finally {
+      set({ loading: false });
+    }
+  },
+  confirmSensitiveMappings: async () => {
+    const selectedProfile = get().profiles.find(
+      (profile) => profile.id === get().selectedProfileId,
+    );
+    if (!selectedProfile) {
+      set({ status: 'Select a profile before confirming sensitive mappings.' });
+      return;
+    }
+
+    const sensitiveBlocks = get().sensitiveBlocks;
+    if (sensitiveBlocks.length === 0) {
+      set({ status: 'No sensitive mappings are waiting for confirmation.' });
+      return;
+    }
+
+    const acceptedMappings = get()
+      .reviewItems.filter((item) => item.status === 'accepted')
+      .map(reviewItemToMapping);
+    const blockedSelectors = new Set(sensitiveBlocks.map((block) => block.selector));
+    const blockedMappings = acceptedMappings.filter((mapping) =>
+      blockedSelectors.has(mapping.selector),
+    );
+    if (blockedMappings.length === 0) {
+      set({ sensitiveBlocks: [], status: 'Sensitive mappings are no longer selected.' });
+      return;
+    }
+
+    set({ loading: true, status: 'Applying confirmed sensitive mappings...' });
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab.id) {
+        throw new Error('No active tab found.');
+      }
+      await assertTabAllowed(tab);
+      await ensureContentScript(tab.id);
+
+      const result = await sendTabMessage<AutofillResult>(tab.id, {
+        type: 'CONTENT_APPLY_MAPPINGS',
+        mappings: blockedMappings,
+        values: selectedProfile.attributes,
+        confirmedSensitiveFieldIds: sensitiveBlocks
+          .map((block) => block.fieldId)
+          .filter((fieldId): fieldId is string => Boolean(fieldId)),
+        confirmedSensitiveSelectors: sensitiveBlocks.map((block) => block.selector),
+        confirmedSensitiveProfileKeys: sensitiveBlocks.map((block) => block.profileKey),
+      });
+
+      set({
+        sensitiveBlocks: result.requiresConfirmation,
+        status:
+          result.requiresConfirmation.length > 0
+            ? `${result.applied} applied; ${result.requiresConfirmation.length} sensitive field${result.requiresConfirmation.length === 1 ? '' : 's'} still blocked`
+            : `${result.applied} confirmed sensitive field${result.applied === 1 ? '' : 's'} applied`,
+      });
+    } catch (error) {
+      set({
+        status: error instanceof Error ? error.message : 'Unable to confirm sensitive mappings.',
+      });
     } finally {
       set({ loading: false });
     }
@@ -317,5 +393,47 @@ const recordReviewFeedback = async (
     });
   } catch {
     // Learning is opportunistic local state; review actions should still work if storage fails.
+  }
+};
+
+const ensureContentScript = async (tabId: number): Promise<void> => {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content/content-script.js'],
+    });
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `Unable to access this tab: ${error.message}`
+        : 'Unable to access this tab.',
+    );
+  }
+};
+
+const assertTabAllowed = async (tab: chrome.tabs.Tab): Promise<void> => {
+  const settings = await sendRuntimeMessage<ExtensionSettings>({ type: 'SETTINGS_GET' });
+  if (settings.allowedOrigins.length === 0) {
+    return;
+  }
+
+  const origin = originForTab(tab);
+  if (!origin || !settings.allowedOrigins.includes(origin)) {
+    throw new Error(
+      `This tab is not in AutoPilotX allowed origins. Add ${origin ?? 'this origin'} in Options first.`,
+    );
+  }
+};
+
+const originForTab = (tab: chrome.tabs.Tab): string | undefined => {
+  if (!tab.url) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(tab.url);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : undefined;
+  } catch {
+    return undefined;
   }
 };

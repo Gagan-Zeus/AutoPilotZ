@@ -9,6 +9,7 @@ export class MapFieldsUseCase {
   ) {}
 
   async execute(request: MappingRequest): Promise<FieldMapping[]> {
+    const aiMinConfidence = Math.max(request.minConfidence, this.aiFallbackThreshold);
     const deterministicMappings = await this.deterministicModel.mapFields({
       ...request,
       minConfidence: 0,
@@ -26,7 +27,7 @@ export class MapFieldsUseCase {
         ? await this.aiModel.mapFields({
             ...request,
             fields: fieldsNeedingAi,
-            minConfidence: 0,
+            minConfidence: aiMinConfidence,
           })
         : [];
 

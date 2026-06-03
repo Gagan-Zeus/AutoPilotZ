@@ -361,9 +361,28 @@ const isValidUrl = (value: string): boolean => {
   }
 };
 
-const isValidDate = (value: string): boolean =>
-  /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+const isValidDate = (value: string): boolean => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return false;
+  }
 
-const isValidYearMonthOrDate = (value: string): boolean =>
-  /^\d{4}-\d{2}(-\d{2})?$/.test(value) &&
-  !Number.isNaN(Date.parse(value.length === 7 ? `${value}-01` : value));
+  const [, yearValue, monthValue, dayValue] = match;
+  const year = Number(yearValue);
+  const month = Number(monthValue);
+  const day = Number(dayValue);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+};
+
+const isValidYearMonthOrDate = (value: string): boolean => {
+  const yearMonthMatch = /^(\d{4})-(\d{2})$/.exec(value);
+  if (yearMonthMatch) {
+    const month = Number(yearMonthMatch[2]);
+    return month >= 1 && month <= 12;
+  }
+
+  return isValidDate(value);
+};

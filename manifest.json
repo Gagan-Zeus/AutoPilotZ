@@ -12,16 +12,9 @@
     "type": "module"
   },
   "options_page": "options.html",
-  "permissions": ["activeTab", "storage"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": ["activeTab", "scripting", "storage"],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
   },
-  "content_scripts": [
-    {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["src/content/content-script.ts"],
-      "run_at": "document_idle"
-    }
-  ]
+  "content_scripts": []
 }

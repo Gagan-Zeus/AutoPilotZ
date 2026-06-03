@@ -12,7 +12,11 @@ class FakeMappingModel implements MappingModel {
   mapFields(request: MappingRequest): Promise<FieldMapping[]> {
     this.calls.push(request);
     const fieldSelectors = new Set(request.fields.map((candidate) => candidate.selector));
-    return Promise.resolve(this.mappings.filter((mapping) => fieldSelectors.has(mapping.selector)));
+    return Promise.resolve(
+      this.mappings
+        .filter((mapping) => fieldSelectors.has(mapping.selector))
+        .filter((mapping) => mapping.confidence >= request.minConfidence),
+    );
   }
 }
 
@@ -90,11 +94,45 @@ describe('MapFieldsUseCase', () => {
       throw new Error('Expected AI fallback to be called once.');
     }
     expect(aiCall.fields.map((candidate) => candidate.selector)).toEqual(['#ambiguous']);
+    expect(aiCall.minConfidence).toBe(0.9);
     expect(mappings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ selector: '#email', profileKey: 'email' }),
         expect.objectContaining({ selector: '#ambiguous', profileKey: 'lastName' }),
       ]),
     );
+  });
+
+  it('drops AI mappings below the fallback confidence floor', async () => {
+    const deterministic = new FakeMappingModel([
+      {
+        selector: '#ambiguous',
+        profileKey: 'firstName',
+        confidence: 0.82,
+        reason: 'fuzzy',
+      },
+    ]);
+    const ai = new FakeMappingModel([
+      {
+        selector: '#ambiguous',
+        profileKey: 'lastName',
+        confidence: 0.89,
+        reason: 'low-confidence ai',
+      },
+    ]);
+
+    const mappings = await new MapFieldsUseCase(deterministic, ai).execute({
+      minConfidence: 0,
+      profileAttributes: {
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+      },
+      fields: [field({ selector: '#ambiguous', label: 'Name' })],
+    });
+
+    expect(ai.calls[0]?.minConfidence).toBe(0.9);
+    expect(mappings).toEqual([
+      expect.objectContaining({ selector: '#ambiguous', profileKey: 'firstName' }),
+    ]);
   });
 });

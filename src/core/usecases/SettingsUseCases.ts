@@ -12,7 +12,7 @@ export class GetSettingsUseCase {
 export class UpdateSettingsUseCase {
   constructor(private readonly repository: SettingsRepository) {}
 
-  execute(settings: Partial<ExtensionSettings>): Promise<ExtensionSettings> {
+  async execute(settings: Partial<ExtensionSettings>): Promise<ExtensionSettings> {
     if (settings.minConfidence !== undefined) {
       const value = settings.minConfidence;
       if (value < 0 || value > 1) {
@@ -20,6 +20,38 @@ export class UpdateSettingsUseCase {
       }
     }
 
-    return this.repository.update(settings);
+    return await this.repository.update({
+      ...settings,
+      allowedOrigins:
+        settings.allowedOrigins === undefined
+          ? undefined
+          : normalizeAllowedOrigins(settings.allowedOrigins),
+    });
   }
 }
+
+const normalizeAllowedOrigins = (origins: string[]): string[] => {
+  const normalized = origins.map((origin) => normalizeOrigin(origin)).filter(Boolean);
+  return [...new Set(normalized)];
+};
+
+const normalizeOrigin = (origin: string): string => {
+  const trimmed = origin.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('Allowed origins must use http or https.');
+    }
+    return parsed.origin;
+  } catch (error) {
+    throw new Error(
+      error instanceof Error && error.message === 'Allowed origins must use http or https.'
+        ? error.message
+        : `Invalid allowed origin: ${origin}`,
+    );
+  }
+};

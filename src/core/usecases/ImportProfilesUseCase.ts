@@ -29,15 +29,22 @@ export class ImportProfilesUseCase {
       command.bundle,
       command.passphrase,
     );
+    if (!Array.isArray(payload.profiles)) {
+      throw new Error('Vault import payload is invalid.');
+    }
+
+    const importedProfiles = this.prepareProfiles(payload.profiles);
 
     const currentProfiles = await this.repository.list(command.passphrase);
     if (command.mode === 'replace') {
-      await Promise.all(currentProfiles.map((profile) => this.repository.remove(profile.id)));
+      for (const profile of currentProfiles) {
+        await this.repository.remove(profile.id);
+      }
     }
 
-    const importedProfiles = await Promise.all(
-      payload.profiles.map((profile) => this.importProfile(profile, command.passphrase)),
-    );
+    for (const profile of importedProfiles) {
+      await this.repository.save(profile, command.passphrase);
+    }
 
     return {
       imported: importedProfiles.length,
@@ -45,7 +52,12 @@ export class ImportProfilesUseCase {
     };
   }
 
-  private async importProfile(profile: VaultProfile, passphrase: string): Promise<VaultProfile> {
+  private prepareProfiles(profiles: VaultProfile[]): VaultProfile[] {
+    const importedProfiles = profiles.map((profile) => this.prepareProfile(profile));
+    return [...new Map(importedProfiles.map((profile) => [profile.id, profile])).values()];
+  }
+
+  private prepareProfile(profile: VaultProfile): VaultProfile {
     const validation = validateProfileData(profile.data);
     if (!validation.valid) {
       throw new Error(
@@ -55,12 +67,11 @@ export class ImportProfilesUseCase {
       );
     }
 
-    const imported = createProfile({
+    return createProfile({
       id: profile.id || crypto.randomUUID(),
       label: profile.label,
       data: profile.data,
       createdAt: profile.createdAt,
     });
-    return this.repository.save(imported, passphrase);
   }
 }

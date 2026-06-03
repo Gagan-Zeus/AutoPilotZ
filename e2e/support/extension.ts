@@ -125,8 +125,6 @@ export const fillMappings = async (
     type: 'CONTENT_APPLY_MAPPINGS',
     mappings,
     values,
-    confirmedSensitiveSelectors: mappings.map((mapping) => mapping.selector),
-    confirmedSensitiveProfileKeys: mappings.map((mapping) => mapping.profileKey),
   });
 
 export const monitorSnapshot = async (page: Page, worker: Worker): Promise<PageMonitorSnapshot> =>
@@ -163,6 +161,7 @@ const sendContentMessage = async <T>(
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       const tabId = await tabIdForPage(worker, page);
+      await injectContentScript(worker, tabId);
       const response = await worker.evaluate(
         async ({ targetTabId, targetMessage }) => {
           type ChromeApi = {
@@ -190,6 +189,24 @@ const sendContentMessage = async <T>(
   }
 
   throw new Error('Content script did not respond.');
+};
+
+const injectContentScript = async (worker: Worker, tabId: number): Promise<void> => {
+  await worker.evaluate(async (targetTabId) => {
+    type ChromeApi = {
+      scripting: {
+        executeScript(injection: {
+          target: { tabId: number };
+          files: string[];
+        }): Promise<unknown[]>;
+      };
+    };
+    const chromeApi = (globalThis as unknown as { chrome: ChromeApi }).chrome;
+    await chromeApi.scripting.executeScript({
+      target: { tabId: targetTabId },
+      files: ['content/content-script.js'],
+    });
+  }, tabId);
 };
 
 const tabIdForPage = async (worker: Worker, page: Page): Promise<number> => {
